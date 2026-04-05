@@ -1,7 +1,7 @@
 // ============================================================
 // AI-Enhanced DevSecOps Pipeline — AI Cybersecurity Shield
 // ============================================================
-// Gemini 1.5 Pro performs DEEP vulnerability analysis beyond
+// Gemini 2.5 Flash performs DEEP vulnerability analysis beyond
 // what tools detect. Generates a premium HTML audit report
 // with flowcharts, code snippets, and remediation roadmap.
 // AI is ADVISOR ONLY — never modifies code.
@@ -229,7 +229,7 @@ pipeline {
         }
 
         // ══════════════════════════════════════════════════════════════════
-        // Phase 4: AI CYBERSECURITY SHIELD (Gemini 1.5 Pro — Deep Analysis)
+        // Phase 4: AI CYBERSECURITY SHIELD (Gemini 2.5 Flash — Deep Analysis)
         // ══════════════════════════════════════════════════════════════════
         stage('Phase 4: AI Cybersecurity Shield') {
             steps {
@@ -237,7 +237,7 @@ pipeline {
 
                     echo "============================================"
                     echo "  🛡️  PHASE 4: AI CYBERSECURITY SHIELD"
-                    echo "  Engine: Gemini 1.5 Pro"
+                    echo "  Engine: Gemini 2.5 Flash"
                     echo "  Role: Deep Analysis + Advisory Only"
                     echo "============================================"
 
@@ -424,7 +424,7 @@ def _collectSourceCode() {
 }
 
 /**
- * Runs the AI Cybersecurity Shield analysis using Gemini 1.5 Pro.
+ * Runs the AI Cybersecurity Shield analysis using Gemini 2.5 Flash.
  * Generates a comprehensive vulnerability report in HTML format.
  */
 def _runSecurityAudit(String toolReports, String sourceCode, String scanErrors, String stageSummary, String stageJson) {
@@ -574,7 +574,7 @@ REMEMBER:
 - Be thorough, specific, and actionable
 """
 
-    echo "🧠 Calling Gemini 1.5 Pro for deep security analysis..."
+    echo "🧠 Calling Gemini 2.5 Flash for deep security analysis..."
     def aiOutput = _geminiCall(prompt)
 
     echo "📊 Generating HTML report..."
@@ -629,7 +629,7 @@ req = {
     'contents': [{'parts': [{'text': prompt}]}],
     'generationConfig': {
         'temperature': 0.2,
-        'maxOutputTokens': 8192
+        'maxOutputTokens': 65536
     }
 }
 print(json.dumps(req))
@@ -641,7 +641,7 @@ if [ -z "$REQUEST" ]; then
     exit 1
 fi
 
-GEMINI_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${API_KEY}"
+GEMINI_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}"
 
 for ATTEMPT in 0 1 2 3; do
     RESPONSE=$(curl -s -w "\\nHTTP_STATUS:%{http_code}" -X POST \

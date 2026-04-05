@@ -29,7 +29,7 @@ if [[ "${REPORT_FILE}" != *.html ]]; then
     REPORT_FILE="${REPORT_FILE%.txt}.html"
 fi
 
-GEMINI_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${API_KEY}"
+GEMINI_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── Helper ────────────────────────────────────────────────────────────────────
