@@ -274,7 +274,7 @@ pipeline {
                     echo "============================================"
 
                     // ── 7. Archive the report ────────────────────────
-                    archiveArtifacts artifacts: 'ai_security_audit.html', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'ai_security_audit.html,ai_security_audit.pdf', allowEmptyArchive: true
                 }
             }
         }
@@ -284,8 +284,10 @@ pipeline {
     post {
         always {
             script {
+                echo "🧹 Cleaning up workspace..."
+                // Archive all debug reports and the final AI report before cleanup
                 try {
-                    archiveArtifacts artifacts: 'scan_errors.txt,ai_security_audit.html,trufflehog_report.json,snyk_report.json,snyk_report.txt,checkov_report.json,checkov_report.txt,sonar_output.txt', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'scan_errors.txt,ai_security_audit.html,ai_security_audit.pdf,trufflehog_report.json,snyk_report.json,snyk_report.txt,checkov_report.json,checkov_report.txt,sonar_output.txt', allowEmptyArchive: true
                 } catch (e) {
                     echo "Artifact archiving skipped: ${e.message}"
                 }
@@ -596,6 +598,18 @@ def _buildHtmlReport(String aiContent, String stageJson, String timestamp) {
         "${timestamp}" \
         "${env.REPORT_FILE}"
     rm -f "${contentFile}" "${stageFile}"
+    
+    # Generate PDF using Gotenberg PDF container on host
+    echo "📄 Generating PDF from HTML..."
+    export PDF_FILE="\${REPORT_FILE%.html}.pdf"
+    if curl --silent --request POST 'http://172.17.0.1:3000/forms/chromium/convert/html' \\
+        --form 'files=@"'${env.REPORT_FILE}'"' \\
+        --form 'waitDelay=5s' \\
+        -o "\$PDF_FILE"; then
+        echo "✅ PDF report generated: \$PDF_FILE"
+    else
+        echo "⚠️ PDF generation failed or Gotenberg unavailable."
+    fi
     """
 
     echo "✅ HTML report generated: ${env.REPORT_FILE}"

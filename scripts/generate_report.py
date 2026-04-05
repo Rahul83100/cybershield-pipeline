@@ -24,7 +24,8 @@ def main():
         stages = json.load(f)
 
     stage_cards = build_stage_cards(stages)
-    js_content = json.dumps(ai_content)
+    import base64
+    b64_content = base64.b64encode(ai_content.encode('utf-8')).decode('utf-8')
 
     passed = sum(1 for s in stages if s['status'] == 'PASSED')
     failed = sum(1 for s in stages if s['status'] == 'FAILED')
@@ -41,7 +42,7 @@ def main():
         posture_label = '🔴 AT RISK'
 
     html = HTML_TEMPLATE
-    html = html.replace('__JS_CONTENT__', js_content)
+    html = html.replace('__B64_CONTENT__', b64_content)
     html = html.replace('__STAGE_CARDS__', stage_cards)
     html = html.replace('__TIMESTAMP__', timestamp)
     html = html.replace('__PASSED__', str(passed))
@@ -396,8 +397,12 @@ body {
 </div>
 
 <script>
-// Render markdown content
-const mdContent = __JS_CONTENT__;
+// Securely decode base64 markdown
+const base64Data = '__B64_CONTENT__';
+const raw = window.atob(base64Data);
+const bytes = new Uint8Array(raw.length);
+for(let i = 0; i < raw.length; i++) { bytes[i] = raw.charCodeAt(i); }
+const mdContent = new TextDecoder().decode(bytes);
 try {
     // Configure marked
     const renderer = new marked.Renderer();
