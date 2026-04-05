@@ -476,11 +476,11 @@ ${sourceCode.take(30000)}
 
 5. 🗺️ ATTACK FLOW VISUALIZATION
    For any Critical or High severity findings, create a Mermaid flowchart showing the attack path:
-   \```mermaid
+   ```mermaid
    graph TD
        A[Entry Point] -->|How| B[Exploitation]
        B --> C[Impact]
-   \```
+   ```
 
 6. 📋 PRIORITIZED REMEDIATION ROADMAP
    Table format with Priority, Issue, Fix description, and Effort estimate
@@ -516,13 +516,13 @@ Use this EXACT structure with emojis for visual clarity:
 - **Description:** [Detailed explanation]
 - **Why Tools Missed It:** [Explanation of tool limitations]
 - **Suggested Fix:**
-\```[language]
+```[language]
 // Before (vulnerable)
 [vulnerable code]
 
 // After (secure)
 [fixed code]
-\```
+```
 - **Tool Upgrade:** [Recommendation or "N/A"]
 
 (Repeat for ALL hidden vulnerabilities found)
@@ -539,10 +539,10 @@ Use this EXACT structure with emojis for visual clarity:
 
 # 🗺️ Attack Flow Visualization
 
-\```mermaid
+```mermaid
 graph TD
     ...
-\```
+```
 
 ---
 
