@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-generate_report.py - Generate a premium HTML security audit report.
-Uses marked.js, mermaid.js, highlight.js via CDN for rich rendering.
+generate_report.py - Generate a premium, FULLY SELF-CONTAINED HTML security audit report.
+NO JavaScript required. NO CDN dependencies. ALL styling is inline.
+Markdown is converted to HTML server-side using pure Python (no external libs).
 
 Usage:
     python3 generate_report.py <content_file> <stage_file> <timestamp> <output_file>
@@ -10,6 +11,186 @@ Usage:
 import sys
 import json
 import os
+import re
+import html as html_module
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Pure Python Markdown-to-HTML converter (no external dependencies)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def md_to_html(md_text):
+    """Convert markdown to HTML using pure Python regex. Handles:
+    - Headers (h1-h4)
+    - Bold, italic, inline code
+    - Code blocks (with language label)
+    - Mermaid diagrams (rendered as styled boxes)
+    - Tables
+    - Unordered & ordered lists
+    - Blockquotes
+    - Horizontal rules
+    - Links
+    - Paragraphs
+    """
+    lines = md_text.split('\n')
+    html_parts = []
+    i = 0
+
+    while i < len(lines):
+        line = lines[i]
+
+        # ── Code blocks ───────────────────────────────────────────────
+        if line.strip().startswith('```'):
+            lang = line.strip()[3:].strip()
+            code_lines = []
+            i += 1
+            while i < len(lines) and not lines[i].strip().startswith('```'):
+                code_lines.append(lines[i])
+                i += 1
+            i += 1  # skip closing ```
+            code_text = html_module.escape('\n'.join(code_lines))
+
+            if lang == 'mermaid':
+                html_parts.append(
+                    f'<div class="mermaid-box">'
+                    f'<div class="mermaid-label">📊 Attack Flow Diagram</div>'
+                    f'<pre class="mermaid-code">{code_text}</pre>'
+                    f'</div>'
+                )
+            else:
+                lang_label = f'<span class="code-lang">{html_module.escape(lang)}</span>' if lang else ''
+                html_parts.append(
+                    f'<div class="code-block">{lang_label}'
+                    f'<pre><code>{code_text}</code></pre></div>'
+                )
+            continue
+
+        # ── Tables ────────────────────────────────────────────────────
+        if '|' in line and line.strip().startswith('|'):
+            table_lines = []
+            while i < len(lines) and '|' in lines[i] and lines[i].strip().startswith('|'):
+                table_lines.append(lines[i])
+                i += 1
+            html_parts.append(_render_table(table_lines))
+            continue
+
+        # ── Horizontal rule ───────────────────────────────────────────
+        if re.match(r'^---+\s*$', line.strip()):
+            html_parts.append('<hr>')
+            i += 1
+            continue
+
+        # ── Headers ───────────────────────────────────────────────────
+        m = re.match(r'^(#{1,4})\s+(.+)$', line)
+        if m:
+            level = len(m.group(1))
+            text = _inline_format(m.group(2))
+            html_parts.append(f'<h{level}>{text}</h{level}>')
+            i += 1
+            continue
+
+        # ── Blockquotes ───────────────────────────────────────────────
+        if line.strip().startswith('>'):
+            quote_lines = []
+            while i < len(lines) and lines[i].strip().startswith('>'):
+                quote_lines.append(re.sub(r'^>\s*', '', lines[i]))
+                i += 1
+            quote_html = '<br>'.join(_inline_format(l) for l in quote_lines)
+            html_parts.append(f'<blockquote>{quote_html}</blockquote>')
+            continue
+
+        # ── Unordered list ────────────────────────────────────────────
+        if re.match(r'^[\s]*[-*]\s+', line):
+            list_items = []
+            while i < len(lines) and re.match(r'^[\s]*[-*]\s+', lines[i]):
+                text = re.sub(r'^[\s]*[-*]\s+', '', lines[i])
+                list_items.append(f'<li>{_inline_format(text)}</li>')
+                i += 1
+            html_parts.append(f'<ul>{"".join(list_items)}</ul>')
+            continue
+
+        # ── Ordered list ──────────────────────────────────────────────
+        if re.match(r'^[\s]*\d+\.\s+', line):
+            list_items = []
+            while i < len(lines) and re.match(r'^[\s]*\d+\.\s+', lines[i]):
+                text = re.sub(r'^[\s]*\d+\.\s+', '', lines[i])
+                list_items.append(f'<li>{_inline_format(text)}</li>')
+                i += 1
+            html_parts.append(f'<ol>{"".join(list_items)}</ol>')
+            continue
+
+        # ── Blank line ────────────────────────────────────────────────
+        if not line.strip():
+            i += 1
+            continue
+
+        # ── Paragraph ─────────────────────────────────────────────────
+        para_lines = []
+        while i < len(lines) and lines[i].strip() and not lines[i].strip().startswith('#') \
+                and not lines[i].strip().startswith('```') and not lines[i].strip().startswith('|') \
+                and not re.match(r'^---+\s*$', lines[i].strip()) \
+                and not re.match(r'^[\s]*[-*]\s+', lines[i]) \
+                and not re.match(r'^[\s]*\d+\.\s+', lines[i]) \
+                and not lines[i].strip().startswith('>'):
+            para_lines.append(lines[i])
+            i += 1
+        if para_lines:
+            text = ' '.join(para_lines)
+            html_parts.append(f'<p>{_inline_format(text)}</p>')
+            continue
+
+        i += 1
+
+    return '\n'.join(html_parts)
+
+
+def _inline_format(text):
+    """Apply inline markdown formatting: bold, italic, code, links."""
+    text = html_module.escape(text)
+    # Inline code
+    text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
+    # Bold + italic
+    text = re.sub(r'\*\*\*(.+?)\*\*\*', r'<strong><em>\1</em></strong>', text)
+    # Bold
+    text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+    # Italic
+    text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
+    # Links [text](url)
+    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2" target="_blank">\1</a>', text)
+    # Restore emoji (html escape may break some)
+    return text
+
+
+def _render_table(lines):
+    """Render a markdown table to HTML."""
+    if len(lines) < 2:
+        return ''
+
+    def parse_row(line):
+        cells = [c.strip() for c in line.strip().strip('|').split('|')]
+        return cells
+
+    headers = parse_row(lines[0])
+    # Skip separator line (line[1])
+    rows = [parse_row(l) for l in lines[2:]] if len(lines) > 2 else []
+
+    thead = ''.join(f'<th>{_inline_format(h)}</th>' for h in headers)
+    tbody_rows = []
+    for row in rows:
+        cells = ''.join(f'<td>{_inline_format(c)}</td>' for c in row)
+        tbody_rows.append(f'<tr>{cells}</tr>')
+
+    return (
+        f'<div class="table-wrap"><table>'
+        f'<thead><tr>{thead}</tr></thead>'
+        f'<tbody>{"".join(tbody_rows)}</tbody>'
+        f'</table></div>'
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Report Builder
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def main():
     if len(sys.argv) != 5:
@@ -24,8 +205,9 @@ def main():
         stages = json.load(f)
 
     stage_cards = build_stage_cards(stages)
-    import base64
-    b64_content = base64.b64encode(ai_content.encode('utf-8')).decode('utf-8')
+
+    # Convert markdown to HTML server-side (no JS needed!)
+    ai_html_content = md_to_html(ai_content) if ai_content.strip() else '<p class="no-data">⚠️ AI analysis was not generated. Check Gemini API key and model configuration.</p>'
 
     passed = sum(1 for s in stages if s['status'] == 'PASSED')
     failed = sum(1 for s in stages if s['status'] == 'FAILED')
@@ -42,7 +224,7 @@ def main():
         posture_label = '🔴 AT RISK'
 
     html = HTML_TEMPLATE
-    html = html.replace('__B64_CONTENT__', b64_content)
+    html = html.replace('__AI_CONTENT__', ai_html_content)
     html = html.replace('__STAGE_CARDS__', stage_cards)
     html = html.replace('__TIMESTAMP__', timestamp)
     html = html.replace('__PASSED__', str(passed))
@@ -59,315 +241,160 @@ def main():
 def build_stage_cards(stages):
     cards = []
     for s in stages:
-        name = s['name']
+        name = html_module.escape(s['name'])
         status = s['status']
-        detail = s.get('detail', '')
+        detail = html_module.escape(s.get('detail', ''))
         if status == 'PASSED':
-            icon, css = '✅', 'passed'
+            icon, css, badge_bg, badge_color = '✅', 'passed', 'rgba(63,185,80,0.2)', '#3fb950'
         elif status == 'FAILED':
-            icon, css = '❌', 'failed'
+            icon, css, badge_bg, badge_color = '❌', 'failed', 'rgba(248,81,73,0.2)', '#f85149'
         else:
-            icon, css = '⏸️', 'skipped'
-        cards.append(f'''<div class="stage-card {css}">
-            <div class="stage-icon">{icon}</div>
-            <div class="stage-name">{name}</div>
-            <div class="stage-status-badge">{status}</div>
-            <div class="stage-detail">{detail}</div>
+            icon, css, badge_bg, badge_color = '⏸️', 'skipped', 'rgba(110,118,129,0.2)', '#6e7681'
+
+        border_color = badge_color
+        cards.append(f'''<div style="background:#161b22;border:1px solid #30363d;border-left:4px solid {border_color};border-radius:12px;padding:1.2rem;text-align:center;">
+            <div style="font-size:2rem;margin-bottom:0.5rem;">{icon}</div>
+            <div style="font-weight:600;font-size:0.95rem;color:#e6edf3;margin-bottom:0.3rem;">{name}</div>
+            <div style="display:inline-block;padding:0.15rem 0.8rem;border-radius:50px;font-size:0.75rem;font-weight:700;letter-spacing:0.05em;background:{badge_bg};color:{badge_color};">{status}</div>
+            <div style="font-size:0.8rem;color:#6e7681;margin-top:0.3rem;">{detail}</div>
         </div>''')
     return '\n'.join(cards)
 
 
-HTML_TEMPLATE = r'''<!DOCTYPE html>
+# ═══════════════════════════════════════════════════════════════════════════════
+# FULLY SELF-CONTAINED HTML TEMPLATE — Zero JS, Zero CDN, All Inline CSS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+HTML_TEMPLATE = '''<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🛡️ AI Security Audit Report</title>
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<title>AI Security Audit Report</title>
 <style>
-:root {
-    --bg-primary: #0d1117;
-    --bg-secondary: #161b22;
-    --bg-tertiary: #21262d;
-    --border: #30363d;
-    --text-primary: #e6edf3;
-    --text-secondary: #8b949e;
-    --text-muted: #6e7681;
-    --accent-blue: #58a6ff;
-    --accent-purple: #bc8cff;
-    --accent-green: #3fb950;
-    --accent-red: #f85149;
-    --accent-orange: #d29922;
-    --accent-cyan: #39d2c0;
-    --gradient-1: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    --gradient-2: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-    --gradient-header: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #1a1e2e 100%);
-    --shadow-lg: 0 10px 40px rgba(0,0,0,0.4);
-    --shadow-glow: 0 0 20px rgba(88,166,255,0.15);
+/* ── Reset & Base ───────────────────────────────── */
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#0d1117;color:#e6edf3;line-height:1.7;min-height:100vh}
+
+/* ── Header ─────────────────────────────────────── */
+.header{background:linear-gradient(135deg,#0d1117 0%,#161b22 50%,#1a1e2e 100%);border-bottom:1px solid #30363d;padding:2.5rem 2rem;text-align:center;position:relative}
+.header::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,rgba(88,166,255,0.08) 0%,transparent 70%);pointer-events:none}
+.header h1{font-size:2.2rem;font-weight:800;background:linear-gradient(90deg,#58a6ff,#bc8cff,#39d2c0);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:0.5rem}
+.meta{color:#8b949e;font-size:0.9rem;display:flex;gap:2rem;justify-content:center;flex-wrap:wrap}
+
+/* ── Posture Badge ──────────────────────────────── */
+.posture{display:inline-flex;align-items:center;gap:0.5rem;padding:0.5rem 1.5rem;border-radius:50px;font-weight:700;font-size:1.1rem;margin-top:1rem}
+.posture-good{background:rgba(63,185,80,0.15);color:#3fb950;border:1px solid rgba(63,185,80,0.3)}
+.posture-warn{background:rgba(210,153,34,0.15);color:#d29922;border:1px solid rgba(210,153,34,0.3)}
+.posture-critical{background:rgba(248,81,73,0.15);color:#f85149;border:1px solid rgba(248,81,73,0.3)}
+
+/* ── Stats Bar ──────────────────────────────────── */
+.stats{display:flex;gap:1.5rem;justify-content:center;padding:1.5rem 2rem;flex-wrap:wrap}
+.stat{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:0.8rem 1.5rem;text-align:center;min-width:120px}
+.stat-val{font-size:1.8rem;font-weight:800}
+.stat-lbl{font-size:0.8rem;color:#8b949e;text-transform:uppercase;letter-spacing:0.05em}
+.stat-p .stat-val{color:#3fb950} .stat-f .stat-val{color:#f85149} .stat-s .stat-val{color:#6e7681}
+
+/* ── Stage Grid ─────────────────────────────────── */
+.dashboard{padding:2rem;max-width:1200px;margin:0 auto}
+.dashboard h2{font-size:1.3rem;font-weight:700;margin-bottom:1rem;color:#8b949e}
+.stage-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem}
+
+/* ── Report Content ─────────────────────────────── */
+.content{max-width:960px;margin:2rem auto;padding:0 2rem}
+.content h1{font-size:1.8rem;font-weight:800;margin:2.5rem 0 1rem;padding-bottom:0.5rem;border-bottom:2px solid #30363d;color:#58a6ff}
+.content h2{font-size:1.4rem;font-weight:700;margin:2rem 0 0.8rem;color:#bc8cff}
+.content h3{font-size:1.15rem;font-weight:600;margin:1.5rem 0 0.6rem;color:#39d2c0}
+.content h4{font-size:1rem;font-weight:600;margin:1.2rem 0 0.5rem;color:#d29922}
+.content p{margin:0.6rem 0;color:#e6edf3}
+.content ul,.content ol{padding-left:1.5rem;margin:0.5rem 0}
+.content li{margin:0.3rem 0}
+.content strong{color:#58a6ff}
+.content em{color:#8b949e}
+.content a{color:#58a6ff;text-decoration:underline}
+.content code{font-family:'Courier New',Courier,monospace;font-size:0.85em;background:#21262d;padding:0.15em 0.4em;border-radius:4px;color:#39d2c0}
+.content blockquote{border-left:4px solid #d29922;background:rgba(210,153,34,0.08);padding:1rem 1.2rem;margin:1rem 0;border-radius:0 8px 8px 0}
+.content hr{border:none;height:1px;background:linear-gradient(90deg,transparent,#30363d,transparent);margin:2.5rem 0}
+
+/* ── Code Blocks ────────────────────────────────── */
+.code-block{position:relative;margin:1rem 0}
+.code-block pre{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:1rem 1.2rem;overflow-x:auto;font-family:'Courier New',Courier,monospace;font-size:0.85rem;line-height:1.6;color:#e6edf3}
+.code-block code{background:none;padding:0;color:#e6edf3;font-size:inherit}
+.code-lang{position:absolute;top:0;right:0;background:#21262d;color:#8b949e;padding:0.2rem 0.6rem;border-radius:0 8px 0 8px;font-size:0.7rem;text-transform:uppercase;font-weight:600}
+
+/* ── Mermaid Boxes ──────────────────────────────── */
+.mermaid-box{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:1.5rem;margin:1rem 0;text-align:center}
+.mermaid-label{color:#bc8cff;font-weight:700;margin-bottom:0.8rem;font-size:1rem}
+.mermaid-code{background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:1rem;text-align:left;font-family:'Courier New',monospace;font-size:0.8rem;color:#8b949e;white-space:pre-wrap}
+
+/* ── Tables ─────────────────────────────────────── */
+.table-wrap{overflow-x:auto;margin:1rem 0}
+.content table{width:100%;border-collapse:collapse;background:#161b22;border-radius:8px;overflow:hidden}
+.content th{background:#21262d;padding:0.7rem 1rem;text-align:left;font-weight:600;color:#58a6ff;border-bottom:2px solid #30363d}
+.content td{padding:0.6rem 1rem;border-bottom:1px solid #30363d;color:#e6edf3}
+.content tr:hover td{background:rgba(88,166,255,0.04)}
+
+/* ── No Data ────────────────────────────────────── */
+.no-data{color:#d29922;font-size:1.1rem;padding:2rem;text-align:center;background:rgba(210,153,34,0.08);border:1px solid rgba(210,153,34,0.3);border-radius:12px;margin:2rem 0}
+
+/* ── Footer ─────────────────────────────────────── */
+.footer{text-align:center;padding:2rem;border-top:1px solid #30363d;color:#6e7681;font-size:0.85rem;margin-top:3rem}
+.badges{display:flex;gap:0.8rem;justify-content:center;margin-top:0.8rem;flex-wrap:wrap}
+.badge{display:inline-flex;align-items:center;gap:0.3rem;padding:0.3rem 0.8rem;border-radius:50px;background:#161b22;border:1px solid #30363d;font-size:0.8rem}
+
+/* ── PDF Button ─────────────────────────────────── */
+.pdf-btn{background:linear-gradient(90deg,#3fb950,#2ea043);border:none;border-radius:8px;padding:0.6rem 1.2rem;color:white;font-weight:600;font-family:inherit;cursor:pointer;margin-top:1rem;box-shadow:0 4px 15px rgba(63,185,80,0.2);font-size:0.9rem}
+
+/* ── Print Styles ───────────────────────────────── */
+@media print{
+    body{background:#fff;color:#000;font-size:11pt}
+    .header{background:#f0f0f0!important;border-bottom:2px solid #ccc;padding:1.5rem}
+    .header h1{-webkit-text-fill-color:#000;background:none;color:#000}
+    .content h1{color:#1a56db;border-bottom-color:#ccc}
+    .content h2{color:#7c3aed}
+    .content h3{color:#0891b2}
+    .content strong{color:#1a56db}
+    .content code{background:#f3f4f6;color:#111}
+    .content p,.content li,.content td{color:#111}
+    .content th{background:#e5e7eb;color:#111}
+    .content table{border:1px solid #ccc}
+    .content td{border-bottom:1px solid #e5e7eb}
+    .code-block pre{background:#f8f9fa!important;border:1px solid #ddd;color:#111}
+    .code-block code{color:#111}
+    .stat,.stage-grid>div{border:1px solid #ccc}
+    .pdf-btn{display:none!important}
+    .mermaid-box{background:#f8f9fa;border-color:#ccc}
+    .mermaid-code{background:#fff;color:#333}
+    pre{white-space:pre-wrap;break-inside:avoid}
+    h1,h2,h3{break-after:avoid}
 }
 
-* { margin: 0; padding: 0; box-sizing: border-box; }
-
-body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    line-height: 1.7;
-    min-height: 100vh;
-}
-
-/* ── Header ─────────────────────────────────── */
-.report-header {
-    background: var(--gradient-header);
-    border-bottom: 1px solid var(--border);
-    padding: 2.5rem 2rem;
-    text-align: center;
-    position: relative;
-    overflow: hidden;
-}
-.report-header::before {
-    content: '';
-    position: absolute; inset: 0;
-    background: radial-gradient(ellipse at 50% 0%, rgba(88,166,255,0.08) 0%, transparent 70%);
-    pointer-events: none;
-}
-.report-header h1 {
-    font-size: 2.2rem;
-    font-weight: 800;
-    background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple), var(--accent-cyan));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin-bottom: 0.5rem;
-}
-.report-meta {
-    color: var(--text-secondary);
-    font-size: 0.9rem;
-    display: flex; gap: 2rem; justify-content: center; flex-wrap: wrap;
-}
-.report-meta span { display: flex; align-items: center; gap: 0.4rem; }
-
-/* ── Posture Badge ──────────────────────────── */
-.posture-badge {
-    display: inline-flex; align-items: center; gap: 0.5rem;
-    padding: 0.5rem 1.5rem; border-radius: 50px;
-    font-weight: 700; font-size: 1.1rem;
-    margin-top: 1rem;
-}
-.posture-good { background: rgba(63,185,80,0.15); color: var(--accent-green); border: 1px solid rgba(63,185,80,0.3); }
-.posture-warn { background: rgba(210,153,34,0.15); color: var(--accent-orange); border: 1px solid rgba(210,153,34,0.3); }
-.posture-critical { background: rgba(248,81,73,0.15); color: var(--accent-red); border: 1px solid rgba(248,81,73,0.3); animation: pulse-red 2s infinite; }
-@keyframes pulse-red { 0%,100%{box-shadow:0 0 0 0 rgba(248,81,73,0.2)} 50%{box-shadow:0 0 20px 5px rgba(248,81,73,0.15)} }
-
-/* ── Stage Dashboard ────────────────────────── */
-.dashboard { padding: 2rem; max-width: 1200px; margin: 0 auto; }
-.dashboard h2 {
-    font-size: 1.3rem; font-weight: 700; margin-bottom: 1rem;
-    color: var(--text-secondary);
-    display: flex; align-items: center; gap: 0.5rem;
-}
-.stage-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 1rem;
-}
-.stage-card {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.2rem;
-    text-align: center;
-    transition: transform 0.2s, box-shadow 0.2s;
-}
-.stage-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
-.stage-card.passed { border-left: 4px solid var(--accent-green); }
-.stage-card.failed { border-left: 4px solid var(--accent-red); }
-.stage-card.skipped { border-left: 4px solid var(--text-muted); }
-.stage-icon { font-size: 2rem; margin-bottom: 0.5rem; }
-.stage-name { font-weight: 600; font-size: 0.95rem; margin-bottom: 0.3rem; }
-.stage-status-badge {
-    display: inline-block; padding: 0.15rem 0.8rem;
-    border-radius: 50px; font-size: 0.75rem; font-weight: 700;
-    letter-spacing: 0.05em;
-}
-.passed .stage-status-badge { background: rgba(63,185,80,0.15); color: var(--accent-green); }
-.failed .stage-status-badge { background: rgba(248,81,73,0.15); color: var(--accent-red); }
-.skipped .stage-status-badge { background: rgba(110,118,129,0.15); color: var(--text-muted); }
-.stage-detail { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.3rem; }
-
-/* ── Stats Bar ──────────────────────────────── */
-.stats-bar {
-    display: flex; gap: 1.5rem; justify-content: center;
-    padding: 1rem 2rem; flex-wrap: wrap;
-}
-.stat {
-    background: var(--bg-secondary); border: 1px solid var(--border);
-    border-radius: 10px; padding: 0.8rem 1.5rem;
-    text-align: center; min-width: 120px;
-}
-.stat-value { font-size: 1.8rem; font-weight: 800; }
-.stat-label { font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
-.stat-passed .stat-value { color: var(--accent-green); }
-.stat-failed .stat-value { color: var(--accent-red); }
-.stat-skipped .stat-value { color: var(--text-muted); }
-
-/* ── Report Content ─────────────────────────── */
-.report-content {
-    max-width: 960px; margin: 2rem auto; padding: 0 2rem;
-}
-.report-content h1 {
-    font-size: 1.8rem; font-weight: 800; margin: 2.5rem 0 1rem;
-    padding-bottom: 0.5rem; border-bottom: 2px solid var(--border);
-    color: var(--accent-blue);
-}
-.report-content h2 {
-    font-size: 1.4rem; font-weight: 700; margin: 2rem 0 0.8rem;
-    color: var(--accent-purple);
-}
-.report-content h3 {
-    font-size: 1.15rem; font-weight: 600; margin: 1.5rem 0 0.6rem;
-    color: var(--accent-cyan);
-}
-.report-content p { margin: 0.6rem 0; color: var(--text-primary); }
-.report-content ul, .report-content ol { padding-left: 1.5rem; margin: 0.5rem 0; }
-.report-content li { margin: 0.3rem 0; }
-.report-content strong { color: var(--accent-blue); }
-.report-content em { color: var(--text-secondary); }
-.report-content a { color: var(--accent-blue); text-decoration: underline; }
-
-/* Code blocks */
-.report-content pre {
-    background: var(--bg-tertiary) !important;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1rem 1.2rem;
-    overflow-x: auto;
-    margin: 1rem 0;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.85rem;
-    line-height: 1.6;
-}
-.report-content code {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.85em;
-}
-.report-content p code, .report-content li code {
-    background: var(--bg-tertiary);
-    padding: 0.15em 0.4em;
-    border-radius: 4px;
-    color: var(--accent-cyan);
-    font-size: 0.85em;
-}
-
-/* Tables */
-.report-content table {
-    width: 100%; border-collapse: collapse; margin: 1rem 0;
-    background: var(--bg-secondary); border-radius: 8px; overflow: hidden;
-}
-.report-content th {
-    background: var(--bg-tertiary); padding: 0.7rem 1rem;
-    text-align: left; font-weight: 600; color: var(--accent-blue);
-    border-bottom: 2px solid var(--border);
-}
-.report-content td {
-    padding: 0.6rem 1rem; border-bottom: 1px solid var(--border);
-}
-.report-content tr:hover td { background: rgba(88,166,255,0.04); }
-
-/* Blockquotes (used for callouts) */
-.report-content blockquote {
-    border-left: 4px solid var(--accent-orange);
-    background: rgba(210,153,34,0.08);
-    padding: 1rem 1.2rem; margin: 1rem 0;
-    border-radius: 0 8px 8px 0;
-}
-
-/* Horizontal rules */
-.report-content hr {
-    border: none; height: 1px;
-    background: linear-gradient(90deg, transparent, var(--border), transparent);
-    margin: 2.5rem 0;
-}
-
-/* Mermaid diagrams */
-.mermaid {
-    background: var(--bg-secondary) !important;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1.5rem;
-    margin: 1rem 0;
-    text-align: center;
-}
-
-/* ── Footer ─────────────────────────────────── */
-.report-footer {
-    text-align: center; padding: 2rem;
-    border-top: 1px solid var(--border);
-    color: var(--text-muted); font-size: 0.85rem;
-    margin-top: 3rem;
-}
-.report-footer .badges { display: flex; gap: 0.8rem; justify-content: center; margin-top: 0.8rem; flex-wrap: wrap; }
-.report-footer .badge {
-    display: inline-flex; align-items: center; gap: 0.3rem;
-    padding: 0.3rem 0.8rem; border-radius: 50px;
-    background: var(--bg-secondary); border: 1px solid var(--border);
-    font-size: 0.8rem;
-}
-
-/* ── Button ─────────────────────────────────── */
-.pdf-btn {
-    background: linear-gradient(90deg, #3fb950, #2ea043);
-    border: none; border-radius: 8px; padding: 0.6rem 1.2rem;
-    color: white; font-weight: 600; font-family: inherit;
-    cursor: pointer; transition: transform 0.2s; margin-top: 1rem;
-    box-shadow: 0 4px 15px rgba(63,185,80,0.2);
-}
-.pdf-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(63,185,80,0.3); }
-
-/* ── Print Styles ───────────────────────────── */
-@media print {
-    body { background: #fff; color: #000; font-size: 11pt; }
-    .report-header { background: #f0f0f0; border-bottom: 2px solid #ccc; padding: 1.5rem; }
-    .report-header h1 { -webkit-text-fill-color: #000; background: none; }
-    .report-content { max-width: 100%; padding: 0; }
-    .stage-card, .stat { border: 1px solid #ccc; break-inside: avoid; }
-    .pdf-btn { display: none !important; }
-    pre { border: 1px solid #ddd; background: #f8f8f8 !important; white-space: pre-wrap; break-inside: avoid; }
-    code { color: #000 !important; font-size: 10pt; }
-    h1, h2, h3 { break-after: avoid; }
-}
-
-/* ── Responsive ─────────────────────────────── */
-@media (max-width: 600px) {
-    .report-header h1 { font-size: 1.5rem; }
-    .report-content { padding: 0 1rem; }
-    .stage-grid { grid-template-columns: 1fr 1fr; }
+@media(max-width:600px){
+    .header h1{font-size:1.5rem}
+    .content{padding:0 1rem}
+    .stage-grid{grid-template-columns:1fr 1fr}
 }
 </style>
 </head>
 <body>
 
 <!-- Header -->
-<div class="report-header">
+<div class="header">
     <h1>🛡️ AI Cybersecurity Shield — Audit Report</h1>
-    <div class="report-meta">
+    <div class="meta">
         <span>📅 __TIMESTAMP__</span>
-        <span>🤖 Gemini 2.5 Pro</span>
+        <span>🤖 Gemini 1.5 Pro</span>
         <span>🔒 Advisory Only — No Code Modified</span>
     </div>
     <button onclick="window.print()" class="pdf-btn">📄 Save as PDF</button>
-    <div class="posture-badge __POSTURE_CLASS__">__POSTURE_LABEL__</div>
+    <div class="posture __POSTURE_CLASS__">__POSTURE_LABEL__</div>
 </div>
 
 <!-- Stats -->
-<div class="stats-bar">
-    <div class="stat stat-passed"><div class="stat-value">__PASSED__</div><div class="stat-label">Passed</div></div>
-    <div class="stat stat-failed"><div class="stat-value">__FAILED__</div><div class="stat-label">Failed</div></div>
-    <div class="stat stat-skipped"><div class="stat-value">__SKIPPED__</div><div class="stat-label">Skipped</div></div>
+<div class="stats">
+    <div class="stat stat-p"><div class="stat-val">__PASSED__</div><div class="stat-lbl">Passed</div></div>
+    <div class="stat stat-f"><div class="stat-val">__FAILED__</div><div class="stat-lbl">Failed</div></div>
+    <div class="stat stat-s"><div class="stat-val">__SKIPPED__</div><div class="stat-lbl">Skipped</div></div>
 </div>
 
 <!-- Stage Dashboard -->
@@ -378,84 +405,20 @@ body {
     </div>
 </div>
 
-<!-- AI Report Content (rendered from markdown) -->
-<div class="report-content" id="report-content">
-    <noscript>
-        <p style="color:var(--accent-orange);">⚠️ JavaScript is required to render this report. Please enable JavaScript or open in a modern browser.</p>
-    </noscript>
-    <p style="color:var(--text-muted);">Loading report...</p>
+<!-- AI Report Content (pre-rendered HTML, no JS needed) -->
+<div class="content">
+__AI_CONTENT__
 </div>
 
 <!-- Footer -->
-<div class="report-footer">
-    <p>🛡️ AI Cybersecurity Shield — Powered by Gemini 2.5 Pro</p>
+<div class="footer">
+    <p>🛡️ AI Cybersecurity Shield — Powered by Gemini 1.5 Pro</p>
     <div class="badges">
         <span class="badge">🚫 Advisor Only</span>
         <span class="badge">📋 Developer Review Required</span>
         <span class="badge">🔒 No Code Modified</span>
     </div>
 </div>
-
-<script>
-// Securely decode base64 markdown
-const base64Data = '__B64_CONTENT__';
-const raw = window.atob(base64Data);
-const bytes = new Uint8Array(raw.length);
-for(let i = 0; i < raw.length; i++) { bytes[i] = raw.charCodeAt(i); }
-const mdContent = new TextDecoder().decode(bytes);
-try {
-    // Configure marked
-    const renderer = new marked.Renderer();
-
-    // Custom code block renderer for mermaid support
-    const origCode = renderer.code;
-    renderer.code = function(code, lang) {
-        // Handle both old and new marked.js API
-        var codeText = typeof code === 'object' ? code.text : code;
-        var codeLang = typeof code === 'object' ? code.lang : lang;
-        if (codeLang === 'mermaid') {
-            return '<div class="mermaid">' + codeText + '</div>';
-        }
-        return '<pre><code class="language-' + (codeLang||'') + '">' +
-               codeText.replace(/</g,'&lt;').replace(/>/g,'&gt;') +
-               '</code></pre>';
-    };
-
-    marked.setOptions({
-        renderer: renderer,
-        gfm: true,
-        breaks: true
-    });
-
-    document.getElementById('report-content').innerHTML = marked.parse(mdContent);
-
-    // Highlight code blocks
-    document.querySelectorAll('pre code').forEach(function(block) {
-        hljs.highlightElement(block);
-    });
-
-    // Initialize mermaid
-    mermaid.initialize({
-        startOnLoad: true,
-        theme: 'dark',
-        themeVariables: {
-            primaryColor: '#58a6ff',
-            primaryTextColor: '#e6edf3',
-            primaryBorderColor: '#30363d',
-            lineColor: '#8b949e',
-            secondaryColor: '#161b22',
-            tertiaryColor: '#21262d',
-            background: '#161b22'
-        }
-    });
-} catch(e) {
-    // Fallback: show raw markdown
-    document.getElementById('report-content').innerHTML =
-        '<pre style="white-space:pre-wrap;word-wrap:break-word;">' +
-        mdContent.replace(/</g,'&lt;').replace(/>/g,'&gt;') +
-        '</pre>';
-}
-</script>
 
 </body>
 </html>'''
