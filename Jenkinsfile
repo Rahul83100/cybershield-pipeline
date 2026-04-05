@@ -599,21 +599,8 @@ def _buildHtmlReport(String aiContent, String stageJson, String timestamp) {
         "${env.REPORT_FILE}"
     rm -f "${contentFile}" "${stageFile}"
 
-    # Zip the report to force download
-    zip "ai_security_report.zip" "${env.REPORT_FILE}"
-
-    
-    # Generate PDF using Gotenberg PDF container on host
-    echo "📄 Generating PDF from HTML..."
-    export PDF_FILE="\${REPORT_FILE%.html}.pdf"
-    if curl --silent --request POST 'http://172.17.0.1:3000/forms/chromium/convert/html' \\
-        --form 'files=@"'${env.REPORT_FILE}'"' \\
-        --form 'waitDelay=5s' \\
-        -o "\$PDF_FILE"; then
-        echo "✅ PDF report generated: \$PDF_FILE"
-    else
-        echo "⚠️ PDF generation failed or Gotenberg unavailable."
-    fi
+    # Zip the report to force download (using python since zip command is missing)
+    python3 -c "import zipfile; zipfile.ZipFile('ai_security_report.zip', 'w', zipfile.ZIP_DEFLATED).write('${env.REPORT_FILE}')"
     """
 
     echo "✅ HTML report generated: ${env.REPORT_FILE}"
