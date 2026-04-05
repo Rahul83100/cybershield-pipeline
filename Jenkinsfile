@@ -397,17 +397,17 @@ def _collectToolReports() {
 def _collectSourceCode() {
     def result = sh(
         script: '''#!/bin/bash
-        find "${WORKSPACE}" -type f \
-            \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" \
-               -o -name "*.tf" -o -name "*.yaml" -o -name "*.yml" \
-               -o -name "*.html" -o -name "*.json" -o -name "*.sh" \
-               -o -name "*.css" -o -name "*.jsx" -o -name "*.tsx" \
-               -o -name "Dockerfile" -o -name "docker-compose*.yml" \) \
-            ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/.scannerwork/*" \
-            ! -path "*/vendor/*" ! -name "package-lock.json" \
-            ! -name "*.min.js" ! -name "*.min.css" \
+        find "${WORKSPACE}" -type f \\
+            \\( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" \\
+               -o -name "*.tf" -o -name "*.yaml" -o -name "*.yml" \\
+               -o -name "*.html" -o -name "*.json" -o -name "*.sh" \\
+               -o -name "*.css" -o -name "*.jsx" -o -name "*.tsx" \\
+               -o -name "Dockerfile" -o -name "docker-compose*.yml" \\) \\
+            ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/.scannerwork/*" \\
+            ! -path "*/vendor/*" ! -name "package-lock.json" \\
+            ! -name "*.min.js" ! -name "*.min.css" \\
             2>/dev/null | head -25 | while IFS= read -r FILE; do
-                RELATIVE=$(echo "${FILE}" | sed "s|${WORKSPACE}/||")
+                RELATIVE=$(echo "${FILE}" | sed "s|\\${WORKSPACE}/||")
                 echo "--- FILE: ${RELATIVE} ---"
                 head -c 3000 "${FILE}" 2>/dev/null
                 echo ""
