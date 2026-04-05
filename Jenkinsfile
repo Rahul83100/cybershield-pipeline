@@ -1,10 +1,10 @@
 // ============================================================
-// AI-Enhanced DevSecOps Pipeline with Gemini Auto-Remediation
+// AI-Enhanced DevSecOps Pipeline — AI Cybersecurity Shield
 // ============================================================
-// FIXED: Trufflehog uses full path /usr/local/bin/trufflehog
-// FIXED: _logError uses writeFile instead of sh echo to avoid quoting issues
-// FIXED: Error capture works correctly across all stages
-// FIXED: Gemini API calls use retry/backoff and gemini-2.0-flash
+// Gemini 2.5 Pro performs DEEP vulnerability analysis beyond
+// what tools detect. Generates a premium HTML audit report
+// with flowcharts, code snippets, and remediation roadmap.
+// AI is ADVISOR ONLY — never modifies code.
 // ============================================================
 
 pipeline {
@@ -13,15 +13,12 @@ pipeline {
 
     environment {
         GEMINI_API_KEY  = credentials('gemini-api-key')
-        GIT_CREDENTIALS = 'github-credentials'
 
-        GIT_REPO_URL    = 'https://github.com/Rahul83100/znfrepairandservices.git'
         GIT_BRANCH      = 'secure-test'
         ADMIN_EMAIL     = 'rahul636071@gmail.com'
 
         ERROR_FILE      = "${WORKSPACE}/scan_errors.txt"
-        REPORT_FILE     = "${WORKSPACE}/ai_report.txt"
-        FIX_SUMMARY     = "${WORKSPACE}/fix_summary.txt"
+        REPORT_FILE     = "${WORKSPACE}/ai_security_audit.html"
     }
 
     options {
@@ -33,12 +30,22 @@ pipeline {
 
     stages {
 
-        // ── Init: clear workspace ─────────────────────────────────────────
+        // ── Init: clear workspace + initialize stage tracking ────────────
         stage('Init') {
             steps {
                 script {
-                    deleteDir() // Wipe the entire workspace to prevent hidden files like old .git logs from triggering scanners
-                    writeFile file: env.ERROR_FILE, text: '' // Recreate the error log file
+                    deleteDir()
+                    writeFile file: env.ERROR_FILE, text: ''
+                    // Stage status tracking
+                    env.STAGE_TRUFFLEHOG = 'NOT_RUN'
+                    env.STAGE_SONARQUBE  = 'NOT_RUN'
+                    env.STAGE_SNYK       = 'NOT_RUN'
+                    env.STAGE_CHECKOV    = 'NOT_RUN'
+                    // Detail messages for each stage
+                    env.DETAIL_TRUFFLEHOG = ''
+                    env.DETAIL_SONARQUBE  = ''
+                    env.DETAIL_SNYK       = ''
+                    env.DETAIL_CHECKOV    = ''
                     echo "✅ Workspace cleaned and pipeline initialised."
                 }
             }
@@ -79,9 +86,14 @@ pipeline {
                             returnStatus: true
                         )
                         if (result != 0) {
-                            def output = fileExists('trufflehog_report.json') ? readFile('trufflehog_report.json').take(3000) : 'Trufflehog failed to run.'
+                            env.STAGE_TRUFFLEHOG = 'FAILED'
+                            env.DETAIL_TRUFFLEHOG = 'Secrets or potential credentials detected in codebase'
+                            def output = fileExists('trufflehog_report.json') ? readFile('trufflehog_report.json').take(5000) : 'Trufflehog failed to run.'
                             _logError('Secrets Scanning (Trufflehog)', output)
                             error("Trufflehog scan failed or found secrets")
+                        } else {
+                            env.STAGE_TRUFFLEHOG = 'PASSED'
+                            env.DETAIL_TRUFFLEHOG = 'No verified secrets found'
                         }
                     }
                 }
@@ -94,12 +106,10 @@ pipeline {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     script {
                         try {
-                            // Use the Jenkins-installed SonarQube Scanner (via plugin)
                             def scannerHome = tool name: 'SonarScanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
                             withSonarQubeEnv('SonarQube') {
                                 sh """
                                     echo "🔍 Running SonarQube SAST scan..."
-                                    echo "Scanner home: ${scannerHome}"
                                     ${scannerHome}/bin/sonar-scanner \
                                         -Dsonar.projectKey=students_tasks \
                                         -Dsonar.projectName="Students IMS" \
@@ -112,13 +122,20 @@ pipeline {
                             timeout(time: 10, unit: 'MINUTES') {
                                 def qg = waitForQualityGate()
                                 if (qg.status != 'OK') {
+                                    env.STAGE_SONARQUBE = 'FAILED'
+                                    env.DETAIL_SONARQUBE = "Quality Gate FAILED: ${qg.status}"
                                     def msg = "SonarQube Quality Gate FAILED: ${qg.status}"
                                     _logError('SAST (SonarQube)', msg)
                                     error(msg)
+                                } else {
+                                    env.STAGE_SONARQUBE = 'PASSED'
+                                    env.DETAIL_SONARQUBE = 'Quality Gate passed'
                                 }
                             }
                         } catch (err) {
-                            def sonarOut = fileExists('sonar_output.txt') ? readFile('sonar_output.txt').take(3000) : err.getMessage()
+                            env.STAGE_SONARQUBE = 'FAILED'
+                            env.DETAIL_SONARQUBE = err.getMessage()?.take(200) ?: 'SonarQube analysis failed'
+                            def sonarOut = fileExists('sonar_output.txt') ? readFile('sonar_output.txt').take(5000) : err.getMessage()
                             _logError('SAST (SonarQube)', sonarOut)
                             throw err
                         }
@@ -139,15 +156,29 @@ pipeline {
                                 echo "❌ snyk command not found at /usr/local/bin/snyk!"
                                 exit 1
                             fi
+                            $SNYK_PATH test --json 2>&1 | tee snyk_report.json
+                            SNYK_EXIT=${PIPESTATUS[0]}
                             $SNYK_PATH test 2>&1 | tee snyk_report.txt
-                            exit ${PIPESTATUS[0]}
+                            exit $SNYK_EXIT
                             ''',
                             returnStatus: true
                         )
                         if (result != 0) {
-                            def snykOut = fileExists('snyk_report.txt') ? readFile('snyk_report.txt').take(5000) : 'Snyk scan failed.'
+                            env.STAGE_SNYK = 'FAILED'
+                            env.DETAIL_SNYK = 'Dependency vulnerabilities detected by Snyk'
+                            def snykOut = ''
+                            if (fileExists('snyk_report.txt')) {
+                                snykOut = readFile('snyk_report.txt').take(8000)
+                            } else if (fileExists('snyk_report.json')) {
+                                snykOut = readFile('snyk_report.json').take(8000)
+                            } else {
+                                snykOut = 'Snyk scan failed - no report generated.'
+                            }
                             _logError('SCA (Snyk)', snykOut)
                             error("Snyk found vulnerabilities")
+                        } else {
+                            env.STAGE_SNYK = 'PASSED'
+                            env.DETAIL_SNYK = 'No dependency vulnerabilities found'
                         }
                         echo "✅ No Snyk vulnerabilities found."
                     }
@@ -167,15 +198,29 @@ pipeline {
                                 echo "❌ checkov command not found at /usr/local/bin/checkov!"
                                 exit 1
                             fi
+                            $CHECKOV_PATH -d . --quiet --skip-check CKV_AWS_144,CKV2_AWS_61,CKV2_AWS_62 -o json 2>&1 | tee checkov_report.json
+                            CHECKOV_EXIT=${PIPESTATUS[0]}
                             $CHECKOV_PATH -d . --quiet --skip-check CKV_AWS_144,CKV2_AWS_61,CKV2_AWS_62 2>&1 | tee checkov_report.txt
-                            exit ${PIPESTATUS[0]}
+                            exit $CHECKOV_EXIT
                             ''',
                             returnStatus: true
                         )
                         if (result != 0) {
-                            def checkovOut = fileExists('checkov_report.txt') ? readFile('checkov_report.txt').take(5000) : 'Checkov scan failed.'
+                            env.STAGE_CHECKOV = 'FAILED'
+                            env.DETAIL_CHECKOV = 'Infrastructure-as-Code misconfigurations found'
+                            def checkovOut = ''
+                            if (fileExists('checkov_report.txt')) {
+                                checkovOut = readFile('checkov_report.txt').take(8000)
+                            } else if (fileExists('checkov_report.json')) {
+                                checkovOut = readFile('checkov_report.json').take(8000)
+                            } else {
+                                checkovOut = 'Checkov scan failed - no report generated.'
+                            }
                             _logError('IaC Scanning (Checkov)', checkovOut)
                             error("Checkov found IaC issues")
+                        } else {
+                            env.STAGE_CHECKOV = 'PASSED'
+                            env.DETAIL_CHECKOV = 'No IaC misconfigurations found'
                         }
                         echo "✅ No IaC issues found."
                     }
@@ -183,113 +228,53 @@ pipeline {
             }
         }
 
-        // ── Phase 4: AI Assessment & Remediation (Gemini) ─────────────────
-        stage('Phase 4: AI Assessment & Remediation (Gemini)') {
+        // ══════════════════════════════════════════════════════════════════
+        // Phase 4: AI CYBERSECURITY SHIELD (Gemini 2.5 Pro — Deep Analysis)
+        // ══════════════════════════════════════════════════════════════════
+        stage('Phase 4: AI Cybersecurity Shield') {
             steps {
                 script {
 
-                    def errorContent = fileExists(env.ERROR_FILE) ? readFile(env.ERROR_FILE).trim() : ''
-                    boolean hasErrors = errorContent.length() > 0
-
                     echo "============================================"
-                    echo "     🤖 PHASE 4: GEMINI AI ASSESSMENT"
+                    echo "  🛡️  PHASE 4: AI CYBERSECURITY SHIELD"
+                    echo "  Engine: Gemini 2.5 Pro"
+                    echo "  Role: Deep Analysis + Advisory Only"
                     echo "============================================"
 
-                    if (!hasErrors) {
-                        // ── No-error path ──────────────────────────
-                        _callGeminiNoErrors()
-                        echo ""
-                        sh "cat '${REPORT_FILE}'"
-                        echo ""
-                        currentBuild.result = 'SUCCESS'
-                        return
-                    }
+                    // ── 1. Collect all tool reports ──────────────────
+                    def toolReports = _collectToolReports()
 
-                    // ── Errors found – get AI report ───────────────
-                    echo "⚠️  Errors found in pipeline stages. Generating AI report..."
-                    _callGeminiWithErrors(errorContent)
+                    // ── 2. Collect source code for semantic analysis ─
+                    def sourceCode = _collectSourceCode()
 
+                    // ── 3. Collect scan error log (NO TRUNCATION) ────
+                    def scanErrors = fileExists(env.ERROR_FILE) ? readFile(env.ERROR_FILE).trim() : ''
+
+                    // ── 4. Build stage status summary ────────────────
+                    def stageSummary = _getStageStatusSummary()
+                    def stageJson = _getStageStatusJson()
+
+                    // ── 5. Run AI Cybersecurity Shield analysis ──────
+                    _runSecurityAudit(toolReports, sourceCode, scanErrors, stageSummary, stageJson)
+
+                    // ── 6. Display summary in console ────────────────
                     echo ""
-                    sh "cat '${REPORT_FILE}'"
+                    echo "╔══════════════════════════════════════════════╗"
+                    echo "║  🛡️  AI CYBERSECURITY SHIELD REPORT          ║"
+                    echo "║  Format: HTML (open in browser)              ║"
+                    echo "╚══════════════════════════════════════════════╝"
                     echo ""
+                    echo "Stage Results:"
+                    echo "  TruffleHog: ${env.STAGE_TRUFFLEHOG}"
+                    echo "  SonarQube:  ${env.STAGE_SONARQUBE}"
+                    echo "  Snyk (SCA): ${env.STAGE_SNYK}"
+                    echo "  Checkov:    ${env.STAGE_CHECKOV}"
+                    echo ""
+                    echo "📥 Download the HTML report from Build Artifacts"
                     echo "============================================"
 
-                    archiveArtifacts artifacts: 'ai_report.txt', allowEmptyArchive: true
-
-                    // ── Admin Approve / Decline ────────────────────
-                    def userInput
-                    timeout(time: 30, unit: 'MINUTES') {
-                        userInput = input(
-                            id: 'aiFixApproval',
-                            message: '🤖 AI found errors. Approve auto-fix?',
-                            submitterParameter: 'APPROVER',
-                            parameters: [
-                                choice(
-                                    name: 'ACTION',
-                                    choices: ['Approve', 'Decline'],
-                                    description: '✅ Approve = AI will fix errors, commit & push.\n❌ Decline = Mark build FAILED.'
-                                )
-                            ]
-                        )
-                    }
-
-                    if (userInput.ACTION == 'Decline') {
-                        currentBuild.result = 'FAILURE'
-                        error("❌ Admin declined AI fix. Build marked FAILED.")
-                    }
-
-                    // ── Apply AI fix ───────────────────────────────
-                    echo "✅ Approved! Applying AI-generated fixes..."
-                    sleep(5) // Brief delay to avoid Gemini rate-limit between calls
-                    _applyGeminiFix(errorContent)
-
-                    // ── Git commit & push ──────────────────────────
-                    withCredentials([usernamePassword(
-                        credentialsId: env.GIT_CREDENTIALS,
-                        usernameVariable: 'GIT_USER',
-                        passwordVariable: 'GIT_PASS'
-                    )]) {
-                        sh """
-                            git config user.email "jenkins-ai@pipeline.local"
-                            git config user.name  "Jenkins AI Bot"
-                            git add -A
-                            git diff --cached --quiet && echo "No changes to commit" || \
-                            git commit -m "🤖 AI Auto-Fix: resolved build #${BUILD_NUMBER} errors"
-                            REPO_PATH=\$(echo '${GIT_REPO_URL}' | sed 's|https://||')
-                            git remote set-url origin "https://\${GIT_USER}:\${GIT_PASS}@\${REPO_PATH}"
-                            git push origin HEAD:${GIT_BRANCH}
-                            echo "✅ Changes pushed to ${GIT_BRANCH}."
-                        """
-                    }
-
-                    // ── Notify admins ──────────────────────────────
-                    try {
-                        emailext(
-                            to: env.ADMIN_EMAIL,
-                            subject: "✅ [Jenkins AI] Error Fixed – Build #${BUILD_NUMBER}",
-                            body: """
-Jenkins AI Auto-Remediation: Build #${BUILD_NUMBER}
-
-The Gemini AI has successfully fixed all errors detected in the pipeline.
-Changes were committed and pushed to ${GIT_BRANCH}.
-
-Fix Summary:
-${fileExists(env.FIX_SUMMARY) ? readFile(env.FIX_SUMMARY) : 'See build artifacts.'}
-
-Build URL: ${env.BUILD_URL}
-                            """.stripIndent()
-                        )
-                    } catch(e) {
-                        echo "⚠️  Email notification skipped (emailext not configured): ${e.message}"
-                    }
-
-                    // ── Trigger new build ──────────────────────────
-                    echo "🚀 Triggering new pipeline build to verify fix..."
-                    build job: env.JOB_NAME, wait: false, propagate: false
-
-                    echo "============================================"
-                    echo " 🎉 ERROR FIXED! New build triggered!"
-                    echo "============================================"
+                    // ── 7. Archive the report ────────────────────────
+                    archiveArtifacts artifacts: 'ai_security_audit.html', allowEmptyArchive: true
                 }
             }
         }
@@ -300,23 +285,26 @@ Build URL: ${env.BUILD_URL}
         always {
             script {
                 try {
-                    archiveArtifacts artifacts: 'scan_errors.txt,ai_report.txt,fix_summary.txt,snyk_report.json,checkov_report.json,trufflehog_report.json', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'scan_errors.txt,ai_security_audit.html,trufflehog_report.json,snyk_report.json,snyk_report.txt,checkov_report.json,checkov_report.txt,sonar_output.txt', allowEmptyArchive: true
                 } catch (e) {
                     echo "Artifact archiving skipped: ${e.message}"
                 }
             }
         }
-        success  { echo "🎉 Pipeline PASSED – No issues found!" }
-        unstable { echo "⚠️  Pipeline UNSTABLE – Check AI report in artifacts." }
-        failure  { echo "❌ Pipeline FAILED – Check stage logs above." }
+        success  { echo "🎉 Pipeline PASSED – All tools clean. AI audit report in artifacts." }
+        unstable { echo "⚠️  Pipeline UNSTABLE – Some stages flagged issues. Check AI audit report in artifacts." }
+        failure  { echo "❌ Pipeline FAILED – Check AI audit report in artifacts for full analysis." }
     }
 
 } // end pipeline
 
 // ═══════════════════════════════════════════════════════════════
-// HELPER FUNCTIONS
+// HELPER FUNCTIONS — AI Cybersecurity Shield
 // ═══════════════════════════════════════════════════════════════
 
+/**
+ * Logs errors from scan stages to the shared error file.
+ */
 def _logError(String stageName, String message) {
     def timestamp = new Date().format("yyyy-MM-dd HH:mm:ss")
     def entry = "\n====== ERROR IN: ${stageName} [${timestamp}] ======\n${message}\n=================================================\n"
@@ -325,140 +313,377 @@ def _logError(String stageName, String message) {
     echo "⚠️  Error logged from stage: ${stageName}"
 }
 
-def _callGeminiNoErrors() {
-    def prompt = "All security scans passed (Secrets, SAST, SCA, IaC). Write a 2-line success message with emojis."
+/**
+ * Returns a formatted stage status summary for the AI prompt.
+ */
+def _getStageStatusSummary() {
+    return """
+PIPELINE STAGE STATUS (from Jenkins):
+| Stage                        | Status     | Detail                                    |
+|------------------------------|------------|-------------------------------------------|
+| Secrets (TruffleHog)         | ${env.STAGE_TRUFFLEHOG.padRight(10)} | ${(env.DETAIL_TRUFFLEHOG ?: 'N/A').take(40).padRight(40)} |
+| SAST (SonarQube)             | ${env.STAGE_SONARQUBE.padRight(10)} | ${(env.DETAIL_SONARQUBE ?: 'N/A').take(40).padRight(40)} |
+| SCA – Dependencies (Snyk)    | ${env.STAGE_SNYK.padRight(10)} | ${(env.DETAIL_SNYK ?: 'N/A').take(40).padRight(40)} |
+| IaC Scanning (Checkov)       | ${env.STAGE_CHECKOV.padRight(10)} | ${(env.DETAIL_CHECKOV ?: 'N/A').take(40).padRight(40)} |
 
-    def report = _geminiCall(prompt)
-    writeFile file: env.REPORT_FILE, text: """
-============================================
-     🤖 GEMINI AI PIPELINE REPORT
-============================================
-
-${report}
-
-============================================
+IMPORTANT: You MUST analyze and report on EVERY stage listed above, especially any with status FAILED.
+If a stage FAILED, you MUST include it in your report with a detailed explanation of what failed and why.
+Do NOT skip or omit any failed stages.
 """.stripIndent()
 }
 
-def _callGeminiWithErrors(String errorContent) {
-    def prompt = "DevSecOps pipeline errors. Give: 1) Summary 2) Severity 3) Fix steps. Be brief.\n\n" + errorContent.take(3000)
-
-    def report = _geminiCall(prompt)
-    writeFile file: env.REPORT_FILE, text: """
-============================================
-     🤖 GEMINI AI PIPELINE ERROR REPORT
-============================================
-
-${report}
-
-============================================
-""".stripIndent()
+/**
+ * Returns stage status as JSON for the HTML report generator.
+ */
+def _getStageStatusJson() {
+    return """[
+    {"name": "Secrets (TruffleHog)", "status": "${env.STAGE_TRUFFLEHOG}", "detail": "${(env.DETAIL_TRUFFLEHOG ?: '').replaceAll('"', '\\\\"')}"},
+    {"name": "SAST (SonarQube)", "status": "${env.STAGE_SONARQUBE}", "detail": "${(env.DETAIL_SONARQUBE ?: '').replaceAll('"', '\\\\"')}"},
+    {"name": "SCA – Snyk", "status": "${env.STAGE_SNYK}", "detail": "${(env.DETAIL_SNYK ?: '').replaceAll('"', '\\\\"')}"},
+    {"name": "IaC (Checkov)", "status": "${env.STAGE_CHECKOV}", "detail": "${(env.DETAIL_CHECKOV ?: '').replaceAll('"', '\\\\"')}"}
+]"""
 }
 
-def _applyGeminiFix(String errorContent) {
-    def prompt = """You are an automated code fixer inside a CI/CD pipeline. Your output will be parsed by a script.
-RULES:
-1. You MUST respond ONLY with fix blocks in this EXACT format (no other text before or after):
-<<<FIX_FILE: relative/path/to/file>>>
-<complete file content>
-<<<END_FIX>>>
-2. Each fix block must contain the COMPLETE file content, not a partial snippet.
-3. Do NOT use placeholder values like YOUR_REGION, YOUR_KEY_ID, etc. Use real working defaults.
-4. Do NOT write shell commands, npm commands, or instructions. ONLY output fix blocks.
-5. For Terraform files, use 'sse_algorithm = "aws:kms"' without specifying a KMS key ARN (AWS uses default).
-6. Fix ALL errors mentioned below in a SINGLE response.
-7. Use the EXACT file path shown in the error report (e.g. if the error says 'File: /ZNF/main.tf', use 'ZNF/main.tf' without the leading slash).
-8. Do NOT wrap code in markdown backticks like ```.
+/**
+ * Collects all tool reports into a single context string.
+ * Increased limits: 8000 chars per report for thorough analysis.
+ */
+def _collectToolReports() {
+    def reports = new StringBuilder()
 
-ERRORS:
-""" + errorContent.take(6000)
+    // TruffleHog
+    reports.append("\n=== TRUFFLEHOG (Secrets Scanner) — Stage: ${env.STAGE_TRUFFLEHOG} ===\n")
+    if (fileExists('trufflehog_report.json')) {
+        reports.append(readFile('trufflehog_report.json').take(8000))
+    } else {
+        reports.append("No report generated (tool may not have run).")
+    }
 
-    def fixInstructions = _geminiCall(prompt)
-    writeFile file: env.FIX_SUMMARY, text: fixInstructions
+    // SonarQube
+    reports.append("\n\n=== SONARQUBE (SAST) — Stage: ${env.STAGE_SONARQUBE} ===\n")
+    if (fileExists('sonar_output.txt')) {
+        reports.append(readFile('sonar_output.txt').take(8000))
+    } else {
+        reports.append("No report generated (tool may not have run).")
+    }
 
-    // Apply fixes via Python
-    sh """
-python3 - <<'PYEOF'
-import re, os
+    // Snyk (check both .json and .txt)
+    reports.append("\n\n=== SNYK (SCA – Dependency Scanning) — Stage: ${env.STAGE_SNYK} ===\n")
+    if (fileExists('snyk_report.json')) {
+        reports.append(readFile('snyk_report.json').take(8000))
+    } else if (fileExists('snyk_report.txt')) {
+        reports.append(readFile('snyk_report.txt').take(8000))
+    } else {
+        reports.append("No report generated (tool may not have run).")
+    }
 
-workspace = '${WORKSPACE}'
-content = open('${FIX_SUMMARY}').read()
+    // Checkov (check both .json and .txt)
+    reports.append("\n\n=== CHECKOV (IaC Scanning) — Stage: ${env.STAGE_CHECKOV} ===\n")
+    if (fileExists('checkov_report.json')) {
+        reports.append(readFile('checkov_report.json').take(8000))
+    } else if (fileExists('checkov_report.txt')) {
+        reports.append(readFile('checkov_report.txt').take(8000))
+    } else {
+        reports.append("No report generated (tool may not have run).")
+    }
 
-pattern = r'<<<FIX_FILE:\\s*(.+?)>>>\\n(.*?)<<<END_FIX>>>'
-matches = re.findall(pattern, content, re.DOTALL)
-if matches:
-    for filepath, filecontent in matches:
-        filepath = filepath.strip()
-        fc = filecontent.strip()
-        fc = re.sub(r'^```[a-z]*\\n+', '', fc) # Remove starting markdown ```json
-        fc = re.sub(r'\\n+```\\Z', '', fc)      # Remove ending markdown ```
-        full = os.path.join(workspace, filepath)
-        os.makedirs(os.path.dirname(full), exist_ok=True)
-        open(full, 'w').write(fc)
-        print(f'Fixed: {filepath}')
-else:
-    print('No structured fix blocks. See fix_summary.txt for manual steps.')
-PYEOF
+    return reports.toString()
+}
+
+/**
+ * Collects relevant source code files for semantic analysis.
+ * Gathers up to 25 code files, capped at 3000 chars each.
+ */
+def _collectSourceCode() {
+    def result = sh(
+        script: '''#!/bin/bash
+        find "${WORKSPACE}" -type f \
+            \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" \
+               -o -name "*.tf" -o -name "*.yaml" -o -name "*.yml" \
+               -o -name "*.html" -o -name "*.json" -o -name "*.sh" \
+               -o -name "*.css" -o -name "*.jsx" -o -name "*.tsx" \
+               -o -name "Dockerfile" -o -name "docker-compose*.yml" \) \
+            ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/.scannerwork/*" \
+            ! -path "*/vendor/*" ! -name "package-lock.json" \
+            ! -name "*.min.js" ! -name "*.min.css" \
+            2>/dev/null | head -25 | while IFS= read -r FILE; do
+                RELATIVE=$(echo "${FILE}" | sed "s|${WORKSPACE}/||")
+                echo "--- FILE: ${RELATIVE} ---"
+                head -c 3000 "${FILE}" 2>/dev/null
+                echo ""
+                echo "--- END FILE ---"
+                echo ""
+            done
+        ''',
+        returnStdout: true
+    ).trim()
+
+    return result ?: "No source files found for analysis."
+}
+
+/**
+ * Runs the AI Cybersecurity Shield analysis using Gemini 2.5 Pro.
+ * Generates a comprehensive vulnerability report in HTML format.
+ */
+def _runSecurityAudit(String toolReports, String sourceCode, String scanErrors, String stageSummary, String stageJson) {
+
+    def prompt = """You are an elite AI Cybersecurity Shield — the LAST LINE OF DEFENSE in a Jenkins DevSecOps pipeline for a project at Christ University.
+
+🚫 STRICT RULE: You are an ADVISOR ONLY. You NEVER modify code directly. You provide detailed analysis, code snippet suggestions, and remediation guidance.
+
+═══ YOUR MISSION ═══
+You go BEYOND what automated tools can detect. You are the intelligence layer that finds what scanners miss.
+Think like a penetration tester + security architect + threat modeler combined.
+
+═══ ${stageSummary} ═══
+
+═══ TOOL SCAN RESULTS (Raw Output) ═══
+${toolReports.take(30000)}
+
+═══ SCAN ERROR LOG ═══
+${scanErrors ?: 'No errors logged – all tool stages passed.'}
+
+═══ SOURCE CODE FOR DEEP SEMANTIC ANALYSIS ═══
+${sourceCode.take(30000)}
+
+═══ ANALYSIS CATEGORIES (You MUST cover ALL of these) ═══
+
+1. 🔍 PIPELINE STAGE ANALYSIS
+   - For EVERY stage marked FAILED above, explain exactly what failed and why
+   - Analyze tool report content to provide specifics about each failure
+   - Do NOT skip any failed stage — this is CRITICAL
+
+2. 🛠️ TOOL-DETECTED ISSUES SUMMARY
+   - Summarize what each tool found (from the raw reports above)
+   - Categorize findings by severity
+
+3. 🧠 AI-DETECTED HIDDEN VULNERABILITIES (YOUR DEEP ANALYSIS)
+   Go beyond tools and analyze the source code for:
+   a) OWASP Top 10: XSS, injection, CSRF, SSRF, broken auth, security misconfiguration, cryptographic failures
+   b) Business Logic Flaws: race conditions, privilege escalation, improper validation, data leakage
+   c) Frontend Security: DOM-based XSS, open redirects, clickjacking, missing CSP headers, unsafe inline scripts, mixed content
+   d) Hardcoded Secrets: API keys, tokens, private keys, passwords in source code (even obfuscated/fake ones)
+   e) Dependency Chain: known CVEs in transitive deps, outdated packages, supply chain risks
+   f) Infrastructure (IaC): missing encryption, overly permissive IAM, public exposure, logging gaps, missing MFA
+   g) API Security: missing rate limiting, improper input validation, verbose error messages, missing authentication
+   h) Data Handling: PII exposure, missing sanitization, insecure storage, GDPR/compliance concerns
+   i) Configuration: insecure defaults, debug mode in production, missing security headers, weak TLS
+   j) Container/Deployment: Dockerfile security, secrets in images, running as root, missing health checks
+
+4. 🔎 TOOL GAP ANALYSIS
+   - What vulnerabilities exist that TruffleHog/SonarQube/Snyk/Checkov CANNOT detect?
+   - What tool upgrades or config changes would improve coverage?
+
+5. 🗺️ ATTACK FLOW VISUALIZATION
+   For any Critical or High severity findings, create a Mermaid flowchart showing the attack path:
+   \```mermaid
+   graph TD
+       A[Entry Point] -->|How| B[Exploitation]
+       B --> C[Impact]
+   \```
+
+6. 📋 PRIORITIZED REMEDIATION ROADMAP
+   Table format with Priority, Issue, Fix description, and Effort estimate
+
+═══ OUTPUT FORMAT (Markdown) ═══
+Use this EXACT structure with emojis for visual clarity:
+
+# 🔍 Pipeline Stage Analysis
+
+## Stage: [Name] — [✅ PASSED / ❌ FAILED]
+**Status:** ...
+**What happened:** ...
+**Root cause:** ...
+**Impact:** ...
+
+(Repeat for EVERY stage, especially all FAILED stages)
+
+---
+
+# 🛠️ Tool-Detected Issues
+
+## From [Tool Name]
+- **[Severity]** [Issue]: [Description]
+
+---
+
+# 🧠 AI-Detected Hidden Vulnerabilities
+
+## 🔴 Issue [N]: [Title]
+- **Severity:** 🔴 Critical / 🟠 High / 🟡 Medium / 🔵 Low
+- **Category:** [OWASP/Business Logic/Frontend/etc.]
+- **Location:** `file:line`
+- **Description:** [Detailed explanation]
+- **Why Tools Missed It:** [Explanation of tool limitations]
+- **Suggested Fix:**
+\```[language]
+// Before (vulnerable)
+[vulnerable code]
+
+// After (secure)
+[fixed code]
+\```
+- **Tool Upgrade:** [Recommendation or "N/A"]
+
+(Repeat for ALL hidden vulnerabilities found)
+
+---
+
+# 🔎 Tool Gap Analysis
+
+| Tool | What It Misses | Recommended Action |
+|------|---------------|-------------------|
+| ... | ... | ... |
+
+---
+
+# 🗺️ Attack Flow Visualization
+
+\```mermaid
+graph TD
+    ...
+\```
+
+---
+
+# 📋 Remediation Roadmap
+
+| Priority | Issue | Fix | Effort |
+|----------|-------|-----|--------|
+| 🔴 P0 | ... | ... | ... |
+| 🟠 P1 | ... | ... | ... |
+| 🟡 P2 | ... | ... | ... |
+
+---
+
+# 📊 Audit Summary
+- **Total issues found:** [N] (Tool-detected: [X] | AI-detected: [Y])
+- **Severity breakdown:** 🔴 Critical: [N] | 🟠 High: [N] | 🟡 Medium: [N] | 🔵 Low: [N]
+- **Pipeline stages:** ✅ Passed: [N] | ❌ Failed: [N] | ⏸️ Skipped: [N]
+- **Security posture:** [Assessment with emoji rating]
+- **Tool upgrade recommendations:** [List]
+- **Top 3 priorities:** [Actionable summary]
+
+REMEMBER:
+- You MUST report on ALL failed stages
+- You MUST provide code snippets for fixes
+- You MUST include Mermaid attack flow diagrams
+- You MUST find vulnerabilities that tools missed
+- Be thorough, specific, and actionable
 """
+
+    echo "🧠 Calling Gemini 2.5 Pro for deep security analysis..."
+    def aiOutput = _geminiCall(prompt)
+
+    echo "📊 Generating HTML report..."
+    def timestamp = new Date().format("yyyy-MM-dd HH:mm:ss")
+    _buildHtmlReport(aiOutput, stageJson, timestamp)
 }
 
+/**
+ * Builds the HTML report using the Python generator script.
+ */
+def _buildHtmlReport(String aiContent, String stageJson, String timestamp) {
+    def contentFile = "${WORKSPACE}/.ai_report_content.md"
+    def stageFile = "${WORKSPACE}/.stage_status.json"
+    writeFile file: contentFile, text: aiContent
+    writeFile file: stageFile, text: stageJson
+
+    sh """#!/bin/bash
+    python3 "${WORKSPACE}/scripts/generate_report.py" \
+        "${contentFile}" \
+        "${stageFile}" \
+        "${timestamp}" \
+        "${env.REPORT_FILE}"
+    rm -f "${contentFile}" "${stageFile}"
+    """
+
+    echo "✅ HTML report generated: ${env.REPORT_FILE}"
+}
+
+/**
+ * Core Gemini API call — Gemini 2.5 Pro with thinking support.
+ * Filters out thinking tokens, returns only the final analysis.
+ */
 def _geminiCall(String prompt) {
-    // Write prompt to temp file to avoid shell escaping issues
     def promptFile = "${WORKSPACE}/.gemini_prompt.txt"
     writeFile file: promptFile, text: prompt
 
-    // All API + retry logic in shell to avoid Groovy CPS serialization issues
-    def result = sh(script: '#!/bin/bash\n' +
-        'set +e\n' +
-        'PROMPT_FILE="' + promptFile + '"\n' +
-        'API_KEY="$GEMINI_API_KEY"\n' +
-        'MAX_RETRIES=3\n' +
-        'DELAYS=(30 60 120)\n' +
-        '\n' +
-        'ESCAPED=$(python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" < "$PROMPT_FILE" 2>/dev/null)\n' +
-        'if [ -z "$ESCAPED" ]; then\n' +
-        '    echo "Failed to escape prompt"\n' +
-        '    exit 1\n' +
-        'fi\n' +
-        '\n' +
-        'REQUEST=\'{"contents":[{"parts":[{"text":\'$ESCAPED\'}]}],"generationConfig":{"temperature":0.3,"maxOutputTokens":1024}}\'\n' +
-        '\n' +
-        'for ATTEMPT in 0 1 2 3; do\n' +
-        '    RESPONSE=$(curl -s -w "\\nHTTP_STATUS:%{http_code}" -X POST \\\n' +
-        '        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}" \\\n' +
-        '        -H "Content-Type: application/json" \\\n' +
-        '        -d "$REQUEST" 2>/dev/null)\n' +
-        '\n' +
-        '    HTTP_STATUS=$(echo "$RESPONSE" | tail -1 | sed "s/HTTP_STATUS://")\n' +
-        '    HTTP_BODY=$(echo "$RESPONSE" | sed "\\$d")\n' +
-        '\n' +
-        '    if [ "$HTTP_STATUS" = "200" ]; then\n' +
-        '        echo "$HTTP_BODY" | python3 -c "\n' +
-        'import sys, json\n' +
-        'try:\n' +
-        '    d = json.load(sys.stdin)\n' +
-        '    print(d[\\\"candidates\\\"][0][\\\"content\\\"][\\\"parts\\\"][0][\\\"text\\\"])\n' +
-        'except Exception as e:\n' +
-        '    print(f\\\"AI response parse error: {e}\\\")\n' +
-        '" 2>/dev/null\n' +
-        '        rm -f "$PROMPT_FILE"\n' +
-        '        exit 0\n' +
-        '    fi\n' +
-        '\n' +
-        '    if [ "$HTTP_STATUS" = "429" ] || [ "$HTTP_STATUS" = "503" ]; then\n' +
-        '        if [ "$ATTEMPT" -lt "$MAX_RETRIES" ]; then\n' +
-        '            DELAY=${DELAYS[$ATTEMPT]}\n' +
-        '            echo "Rate limited ($HTTP_STATUS), waiting ${DELAY}s... (retry $((ATTEMPT+1))/$MAX_RETRIES)" >&2\n' +
-        '            sleep "$DELAY"\n' +
-        '        fi\n' +
-        '    else\n' +
-        '        break\n' +
-        '    fi\n' +
-        'done\n' +
-        '\n' +
-        'rm -f "$PROMPT_FILE"\n' +
-        'echo "Gemini API error ($HTTP_STATUS). Check key at https://aistudio.google.com/app/apikey"\n',
-        returnStdout: true).trim()
+    def result = sh(script: '''#!/bin/bash
+set +e
 
-    return result ?: "Gemini API returned no content. Check API key and quota."
+PROMPT_FILE="''' + promptFile + '''"
+API_KEY="$GEMINI_API_KEY"
+MAX_RETRIES=3
+DELAYS=(30 60 120)
+
+# Build request JSON safely using Python
+REQUEST=$(python3 -c "
+import sys, json
+prompt = open('$PROMPT_FILE', 'r', encoding='utf-8', errors='replace').read()
+req = {
+    'contents': [{'parts': [{'text': prompt}]}],
+    'generationConfig': {
+        'temperature': 0.2,
+        'maxOutputTokens': 65536
+    }
+}
+print(json.dumps(req))
+" 2>/dev/null)
+
+if [ -z "$REQUEST" ]; then
+    echo "Failed to build API request"
+    rm -f "$PROMPT_FILE"
+    exit 1
+fi
+
+GEMINI_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-preview-05-06:generateContent?key=${API_KEY}"
+
+for ATTEMPT in 0 1 2 3; do
+    RESPONSE=$(curl -s -w "\\nHTTP_STATUS:%{http_code}" -X POST \
+        "$GEMINI_URL" \
+        -H "Content-Type: application/json" \
+        -d "$REQUEST" 2>/dev/null)
+
+    HTTP_STATUS=$(echo "$RESPONSE" | tail -1 | sed "s/HTTP_STATUS://")
+    HTTP_BODY=$(echo "$RESPONSE" | sed "\\$d")
+
+    echo "Gemini API status: $HTTP_STATUS" >&2
+
+    if [ "$HTTP_STATUS" = "200" ]; then
+        # Parse response, filter out thinking tokens
+        echo "$HTTP_BODY" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    parts = d['candidates'][0]['content']['parts']
+    # Filter out thinking/thought parts, keep only final output
+    text_parts = [p['text'] for p in parts if not p.get('thought', False)]
+    print('\\n'.join(text_parts))
+except Exception as e:
+    print(f'AI response parse error: {e}')
+" 2>/dev/null
+        rm -f "$PROMPT_FILE"
+        exit 0
+    fi
+
+    if [ "$HTTP_STATUS" = "429" ] || [ "$HTTP_STATUS" = "503" ]; then
+        if [ "$ATTEMPT" -lt "$MAX_RETRIES" ]; then
+            DELAY=${DELAYS[$ATTEMPT]}
+            echo "Rate limited ($HTTP_STATUS), waiting ${DELAY}s... (retry $((ATTEMPT+1))/$MAX_RETRIES)" >&2
+            sleep "$DELAY"
+        fi
+    else
+        break
+    fi
+done
+
+rm -f "$PROMPT_FILE"
+echo "⚠️ Gemini API error ($HTTP_STATUS). Check key at https://aistudio.google.com/app/apikey"
+echo ""
+echo "Raw response: $HTTP_BODY"
+''',
+    returnStdout: true).trim()
+
+    return result ?: "⚠️ Gemini API returned no content. Check API key and quota at https://aistudio.google.com/app/apikey"
 }
