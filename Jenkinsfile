@@ -274,7 +274,7 @@ pipeline {
                     echo "============================================"
 
                     // ── 7. Archive the report ────────────────────────
-                    archiveArtifacts artifacts: 'ai_security_report.zip', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'ai_security_audit.html', allowEmptyArchive: true
                 }
             }
         }
@@ -287,7 +287,7 @@ pipeline {
                 echo "🧹 Cleaning up workspace..."
                 // Archive all debug reports and the final AI report before cleanup
                 try {
-                    archiveArtifacts artifacts: 'scan_errors.txt,ai_security_report.zip,trufflehog_report.json,snyk_report.json,snyk_report.txt,checkov_report.json,checkov_report.txt,sonar_output.txt', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'scan_errors.txt,ai_security_audit.html,trufflehog_report.json,snyk_report.json,snyk_report.txt,checkov_report.json,checkov_report.txt,sonar_output.txt', allowEmptyArchive: true
                 } catch (e) {
                     echo "Artifact archiving skipped: ${e.message}"
                 }
@@ -599,15 +599,14 @@ def _buildHtmlReport(String aiContent, String stageJson, String timestamp) {
         "${env.REPORT_FILE}"
     rm -f "${contentFile}" "${stageFile}"
 
-    # Zip the report to force download (using python since zip command is missing)
-    python3 -c "import zipfile; zipfile.ZipFile('ai_security_report.zip', 'w', zipfile.ZIP_DEFLATED).write('${env.REPORT_FILE}')"
+    # Just output the HTML file normally
     """
 
     echo "✅ HTML report generated: ${env.REPORT_FILE}"
 }
 
 /**
- * Core Gemini API call — Gemini 2.5 Pro with thinking support.
+ * Core Gemini API call — Gemini 1.5 Pro with thinking support.
  * Filters out thinking tokens, returns only the final analysis.
  */
 def _geminiCall(String prompt) {
@@ -630,7 +629,7 @@ req = {
     'contents': [{'parts': [{'text': prompt}]}],
     'generationConfig': {
         'temperature': 0.2,
-        'maxOutputTokens': 65536
+        'maxOutputTokens': 8192
     }
 }
 print(json.dumps(req))
@@ -642,7 +641,7 @@ if [ -z "$REQUEST" ]; then
     exit 1
 fi
 
-GEMINI_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-preview-05-06:generateContent?key=${API_KEY}"
+GEMINI_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${API_KEY}"
 
 for ATTEMPT in 0 1 2 3; do
     RESPONSE=$(curl -s -w "\\nHTTP_STATUS:%{http_code}" -X POST \
