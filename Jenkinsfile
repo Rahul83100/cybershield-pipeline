@@ -274,7 +274,7 @@ pipeline {
                     echo "============================================"
 
                     // ── 7. Archive the report ────────────────────────
-                    archiveArtifacts artifacts: 'ai_security_audit.html,ai_security_audit.pdf', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'ai_security_audit.html', allowEmptyArchive: true
                 }
             }
         }
@@ -287,7 +287,7 @@ pipeline {
                 echo "🧹 Cleaning up workspace..."
                 // Archive all debug reports and the final AI report before cleanup
                 try {
-                    archiveArtifacts artifacts: 'scan_errors.txt,ai_security_audit.html,ai_security_audit.pdf,trufflehog_report.json,snyk_report.json,snyk_report.txt,checkov_report.json,checkov_report.txt,sonar_output.txt', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'scan_errors.txt,ai_security_audit.html,trufflehog_report.json,snyk_report.json,snyk_report.txt,checkov_report.json,checkov_report.txt,sonar_output.txt', allowEmptyArchive: true
                 } catch (e) {
                     echo "Artifact archiving skipped: ${e.message}"
                 }
