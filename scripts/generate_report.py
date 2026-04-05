@@ -317,11 +317,27 @@ body {
     font-size: 0.8rem;
 }
 
+/* ── Button ─────────────────────────────────── */
+.pdf-btn {
+    background: linear-gradient(90deg, #3fb950, #2ea043);
+    border: none; border-radius: 8px; padding: 0.6rem 1.2rem;
+    color: white; font-weight: 600; font-family: inherit;
+    cursor: pointer; transition: transform 0.2s; margin-top: 1rem;
+    box-shadow: 0 4px 15px rgba(63,185,80,0.2);
+}
+.pdf-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(63,185,80,0.3); }
+
 /* ── Print Styles ───────────────────────────── */
 @media print {
-    body { background: #fff; color: #000; }
-    .report-header { background: #f0f0f0; }
-    .stage-card, .stat { border: 1px solid #ccc; }
+    body { background: #fff; color: #000; font-size: 11pt; }
+    .report-header { background: #f0f0f0; border-bottom: 2px solid #ccc; padding: 1.5rem; }
+    .report-header h1 { -webkit-text-fill-color: #000; background: none; }
+    .report-content { max-width: 100%; padding: 0; }
+    .stage-card, .stat { border: 1px solid #ccc; break-inside: avoid; }
+    .pdf-btn { display: none !important; }
+    pre { border: 1px solid #ddd; background: #f8f8f8 !important; white-space: pre-wrap; break-inside: avoid; }
+    code { color: #000 !important; font-size: 10pt; }
+    h1, h2, h3 { break-after: avoid; }
 }
 
 /* ── Responsive ─────────────────────────────── */
@@ -342,6 +358,7 @@ body {
         <span>🤖 Gemini 2.5 Pro</span>
         <span>🔒 Advisory Only — No Code Modified</span>
     </div>
+    <button onclick="window.print()" class="pdf-btn">📄 Save as PDF</button>
     <div class="posture-badge __POSTURE_CLASS__">__POSTURE_LABEL__</div>
 </div>
 
