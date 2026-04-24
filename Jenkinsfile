@@ -11,9 +11,12 @@ pipeline {
 
     agent any
 
-    environment {
-        GEMINI_API_KEY  = credentials('gemini-api-key')
+    parameters {
+        string(name: 'REPO_URL', defaultValue: '', description: 'GitHub Repository URL to scan (HTTPS format)')
+        string(name: 'BRANCH_NAME', defaultValue: 'main', description: 'Branch to scan (e.g., main, develop)')
+    }
 
+    environment {
         GIT_BRANCH      = 'secure-test'
         ADMIN_EMAIL     = 'rahul636071@gmail.com'
 
@@ -55,7 +58,13 @@ pipeline {
         stage('Checkout Source Code') {
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                    checkout scm
+                    script {
+                        if (!params.REPO_URL) {
+                            error("REPO_URL parameter is required!")
+                        }
+                        echo "⬇️ Cloning ${params.REPO_URL} (Branch: ${params.BRANCH_NAME})..."
+                        git branch: "${params.BRANCH_NAME}", url: "${params.REPO_URL}"
+                    }
                     echo "✅ Source code checked out."
                 }
             }
@@ -482,13 +491,19 @@ ${sourceCode.take(30000)}
    graph TD
        A[Entry Point] -->|How| B[Exploitation]
        B --> C[Impact]
-   ```
-
 6. 📋 PRIORITIZED REMEDIATION ROADMAP
-   Table format with Priority, Issue, Fix description, and Effort estimate
+   Keep explanations extremely brief. Focus ONLY on actionable fixes. Avoid conversational filler.
 
 ═══ OUTPUT FORMAT (Markdown) ═══
-Use this EXACT structure with emojis for visual clarity:
+CRITICAL INSTRUCTION TO SAVE TOKENS: BE EXTREMELY CONCISE. 
+Do not write long paragraphs or greetings. Use bullet points and minimal descriptions.
+
+🎯 ZERO-HALLUCINATION RULE:
+If ALL pipeline stages PASSED, AND you do not find any legitimate Critical, High, or Medium severity hidden vulnerabilities in the source code, DO NOT force yourself to invent or report theoretical low-severity issues.
+Instead, you MUST output ONLY this exact string and literally nothing else:
+[NO_ERRORS_DETECTED]
+
+If (and only if) there are tool failures OR you found legitimate hidden vulnerabilities, you MUST follow the exact template below and do not deviate:
 
 # 🔍 Pipeline Stage Analysis
 
@@ -574,12 +589,27 @@ REMEMBER:
 - Be thorough, specific, and actionable
 """
 
-    echo "🧠 Calling Gemini 2.5 Flash for deep security analysis..."
-    def aiOutput = _geminiCall(prompt)
+    echo "🧠 Calling AWS Bedrock Claude 3.5 Sonnet for deep security analysis..."
+    def aiOutput = _awsBedrockCall(prompt)
 
-    echo "📊 Generating HTML report..."
     def timestamp = new Date().format("yyyy-MM-dd HH:mm:ss")
-    _buildHtmlReport(aiOutput, stageJson, timestamp)
+
+    if (aiOutput.trim().contains("[NO_ERRORS_DETECTED]")) {
+        echo "============================================"
+        echo "✅ AI SHIELD: PASSED WITH NO ERRORS!"
+        echo "No tool vulnerabilities or hidden structural vulnerabilities were detected."
+        echo "============================================"
+        
+        def successMsg = """# ✅ Security Audit Passed
+All DevSecOps pipeline scanners passed cleanly. Furthermore, the AI Cybersecurity Shield performed a deep semantic analysis and found no critical, high, or medium severity hidden logic vulnerabilities.
+The codebase is currently considered secure."""
+        
+        _buildHtmlReport(successMsg, stageJson, timestamp)
+    } else {
+        echo "⚠️ AI SHIELD: Vulnerabilities detected (either by tools or AI)."
+        echo "📊 Generating full HTML vulnerability report..."
+        _buildHtmlReport(aiOutput, stageJson, timestamp)
+    }
 }
 
 /**
@@ -606,88 +636,21 @@ def _buildHtmlReport(String aiContent, String stageJson, String timestamp) {
 }
 
 /**
- * Core Gemini API call — Gemini 1.5 Pro with thinking support.
- * Filters out thinking tokens, returns only the final analysis.
+ * Core AWS Bedrock API call — Claude 3.5 Sonnet.
+ * Uses the bedrock_query.py script to execute the call securely.
  */
-def _geminiCall(String prompt) {
-    def promptFile = "${WORKSPACE}/.gemini_prompt.txt"
+def _awsBedrockCall(String prompt) {
+    def promptFile = "${WORKSPACE}/.bedrock_prompt.txt"
     writeFile file: promptFile, text: prompt
 
     def result = sh(script: '''#!/bin/bash
 set +e
-
-PROMPT_FILE="''' + promptFile + '''"
-API_KEY="$GEMINI_API_KEY"
-MAX_RETRIES=3
-DELAYS=(30 60 120)
-
-# Build request JSON safely using Python
-REQUEST=$(python3 -c "
-import sys, json
-prompt = open('$PROMPT_FILE', 'r', encoding='utf-8', errors='replace').read()
-req = {
-    'contents': [{'parts': [{'text': prompt}]}],
-    'generationConfig': {
-        'temperature': 0.2,
-        'maxOutputTokens': 65536
-    }
-}
-print(json.dumps(req))
-" 2>/dev/null)
-
-if [ -z "$REQUEST" ]; then
-    echo "Failed to build API request"
-    rm -f "$PROMPT_FILE"
-    exit 1
-fi
-
-GEMINI_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}"
-
-for ATTEMPT in 0 1 2 3; do
-    RESPONSE=$(curl -s -w "\\nHTTP_STATUS:%{http_code}" -X POST \
-        "$GEMINI_URL" \
-        -H "Content-Type: application/json" \
-        -d "$REQUEST" 2>/dev/null)
-
-    HTTP_STATUS=$(echo "$RESPONSE" | tail -1 | sed "s/HTTP_STATUS://")
-    HTTP_BODY=$(echo "$RESPONSE" | sed "\\$d")
-
-    echo "Gemini API status: $HTTP_STATUS" >&2
-
-    if [ "$HTTP_STATUS" = "200" ]; then
-        # Parse response, filter out thinking tokens
-        echo "$HTTP_BODY" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    parts = d['candidates'][0]['content']['parts']
-    # Filter out thinking/thought parts, keep only final output
-    text_parts = [p['text'] for p in parts if not p.get('thought', False)]
-    print('\\n'.join(text_parts))
-except Exception as e:
-    print(f'AI response parse error: {e}')
-" 2>/dev/null
-        rm -f "$PROMPT_FILE"
-        exit 0
-    fi
-
-    if [ "$HTTP_STATUS" = "429" ] || [ "$HTTP_STATUS" = "503" ]; then
-        if [ "$ATTEMPT" -lt "$MAX_RETRIES" ]; then
-            DELAY=${DELAYS[$ATTEMPT]}
-            echo "Rate limited ($HTTP_STATUS), waiting ${DELAY}s... (retry $((ATTEMPT+1))/$MAX_RETRIES)" >&2
-            sleep "$DELAY"
-        fi
-    else
-        break
-    fi
-done
-
-rm -f "$PROMPT_FILE"
-echo "⚠️ Gemini API error ($HTTP_STATUS). Check key at https://aistudio.google.com/app/apikey"
-echo ""
-echo "Raw response: $HTTP_BODY"
+python3 "${WORKSPACE}/scripts/bedrock_query.py" "''' + promptFile + '''"
 ''',
     returnStdout: true).trim()
 
-    return result ?: "⚠️ Gemini API returned no content. Check API key and quota at https://aistudio.google.com/app/apikey"
+    // Clean up
+    sh "rm -f ${promptFile}"
+
+    return result ?: "⚠️ AWS Bedrock returned no content. Check server IAM Role and script logs."
 }
