@@ -11,12 +11,12 @@ def query_bedrock(prompt_file):
         print(f"Error reading prompt file: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Initialize the Bedrock Runtime client
+    # Initialize the Bedrock Runtime client in the Mumbai region
     # NOTE: Ensure the EC2 instance has an IAM Role with AmazonBedrockFullAccess
-    client = boto3.client('bedrock-runtime', region_name='us-east-1')
+    client = boto3.client('bedrock-runtime', region_name='ap-south-1')
 
     # Claude 4.6 Sonnet Model ID on AWS Bedrock (User Specified)
-    model_id = 'anthropic.claude-sonnet-4-6'
+    model_id = 'global.anthropic.claude-sonnet-4-6'
     
     payload = {
         "anthropic_version": "bedrock-2023-05-31",
