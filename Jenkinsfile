@@ -37,7 +37,7 @@ pipeline {
         stage('Init') {
             steps {
                 script {
-                    deleteDir()
+                    sh "rm -rf target_repo scan_errors.txt ai_security_audit.html trufflehog_report.json sonar_output.txt snyk_report.txt snyk_report.json checkov_report.json checkov_report.txt"
                     writeFile file: env.ERROR_FILE, text: ''
                     // Stage status tracking
                     env.STAGE_TRUFFLEHOG = 'NOT_RUN'
@@ -62,8 +62,10 @@ pipeline {
                         if (!params.REPO_URL) {
                             error("REPO_URL parameter is required!")
                         }
-                        echo "⬇️ Cloning ${params.REPO_URL} (Branch: ${params.BRANCH_NAME})..."
-                        git branch: "${params.BRANCH_NAME}", url: "${params.REPO_URL}"
+                        echo "⬇️ Cloning ${params.REPO_URL} (Branch: ${params.BRANCH_NAME}) into target_repo..."
+                        dir('target_repo') {
+                            git branch: "${params.BRANCH_NAME}", url: "${params.REPO_URL}"
+                        }
                     }
                     echo "✅ Source code checked out."
                 }
@@ -85,7 +87,7 @@ pipeline {
                             script: """
                                 set +e
                                 echo "🔍 Running Trufflehog secrets scan..."
-                                ${trufflehogPath} filesystem "${WORKSPACE}" --exclude-paths=.trufflehog-ignore --json > trufflehog_report.json 2>&1
+                                ${trufflehogPath} filesystem "${WORKSPACE}/target_repo" --exclude-paths=.trufflehog-ignore --json > trufflehog_report.json 2>&1
                                 if grep -q '"verified":true' trufflehog_report.json 2>/dev/null; then
                                     echo "[SECRETS_FOUND]"
                                     exit 1
@@ -122,7 +124,7 @@ pipeline {
                                     ${scannerHome}/bin/sonar-scanner \
                                         -Dsonar.projectKey=students_tasks \
                                         -Dsonar.projectName="Students IMS" \
-                                        -Dsonar.sources=. \
+                                        -Dsonar.sources=target_repo \
                                         -Dsonar.exclusions=node_modules/**,**/*.test.js,.git/**,*.json \
                                         -Dsonar.host.url=http://68.183.93.244:9000 \
                                         2>&1 | tee sonar_output.txt
@@ -165,9 +167,9 @@ pipeline {
                                 echo "❌ snyk command not found at /usr/local/bin/snyk!"
                                 exit 1
                             fi
-                            $SNYK_PATH test --json 2>&1 | tee snyk_report.json
+                            $SNYK_PATH test target_repo --json 2>&1 | tee snyk_report.json
                             SNYK_EXIT=${PIPESTATUS[0]}
-                            $SNYK_PATH test 2>&1 | tee snyk_report.txt
+                            $SNYK_PATH test target_repo 2>&1 | tee snyk_report.txt
                             exit $SNYK_EXIT
                             ''',
                             returnStatus: true
@@ -207,9 +209,9 @@ pipeline {
                                 echo "❌ checkov command not found at /usr/local/bin/checkov!"
                                 exit 1
                             fi
-                            $CHECKOV_PATH -d . --quiet --skip-check CKV_AWS_144,CKV2_AWS_61,CKV2_AWS_62 -o json 2>&1 | tee checkov_report.json
+                            $CHECKOV_PATH -d target_repo --quiet --skip-check CKV_AWS_144,CKV2_AWS_61,CKV2_AWS_62 -o json 2>&1 | tee checkov_report.json
                             CHECKOV_EXIT=${PIPESTATUS[0]}
-                            $CHECKOV_PATH -d . --quiet --skip-check CKV_AWS_144,CKV2_AWS_61,CKV2_AWS_62 2>&1 | tee checkov_report.txt
+                            $CHECKOV_PATH -d target_repo --quiet --skip-check CKV_AWS_144,CKV2_AWS_61,CKV2_AWS_62 2>&1 | tee checkov_report.txt
                             exit $CHECKOV_EXIT
                             ''',
                             returnStatus: true
