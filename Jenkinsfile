@@ -14,6 +14,7 @@ pipeline {
     parameters {
         string(name: 'REPO_URL', defaultValue: '', description: 'GitHub Repository URL to scan (HTTPS format)')
         string(name: 'BRANCH_NAME', defaultValue: 'main', description: 'Branch to scan (e.g., main, develop)')
+        password(name: 'OPENAI_API_KEY', defaultValue: '', description: 'Securely inject OpenAI API Key (starts with sk-...)')
     }
 
     environment {
@@ -591,8 +592,8 @@ REMEMBER:
 - Be thorough, specific, and actionable
 """
 
-    echo "🧠 Calling AWS Bedrock Claude 3.5 Sonnet for deep security analysis..."
-    def aiOutput = _awsBedrockCall(prompt)
+    echo "🧠 Calling OpenAI o3-mini Reasoning Model for deep security analysis..."
+    def aiOutput = _openAiCall(prompt)
 
     def timestamp = new Date().format("yyyy-MM-dd HH:mm:ss")
 
@@ -638,21 +639,21 @@ def _buildHtmlReport(String aiContent, String stageJson, String timestamp) {
 }
 
 /**
- * Core AWS Bedrock API call — Claude 3.5 Sonnet.
- * Uses the bedrock_query.py script to execute the call securely.
+ * Core OpenAI API call — GPT o3-mini (Reasoning Model for Security)
+ * Uses the openai_query.py script to execute the call securely.
  */
-def _awsBedrockCall(String prompt) {
-    def promptFile = "${WORKSPACE}/.bedrock_prompt.txt"
+def _openAiCall(String prompt) {
+    def promptFile = "${WORKSPACE}/.openai_prompt.txt"
     writeFile file: promptFile, text: prompt
 
     def result = sh(script: '''#!/bin/bash
 set +e
-python3 "${WORKSPACE}/scripts/bedrock_query.py" "''' + promptFile + '''"
+python3 "${WORKSPACE}/scripts/openai_query.py" "''' + promptFile + '''"
 ''',
     returnStdout: true).trim()
 
     // Clean up
     sh "rm -f ${promptFile}"
 
-    return result ?: "⚠️ AWS Bedrock returned no content. Check server IAM Role and script logs."
+    return result ?: "⚠️ OpenAI API returned no content. Check connectivity and quota."
 }
