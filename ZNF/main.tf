@@ -30,8 +30,12 @@ resource "aws_s3_bucket_public_access_block" "student_data_access" {
   restrict_public_buckets = true
 }
 
+resource "aws_s3_bucket" "logging_bucket" {
+  bucket = "ims-christ-university-logs"
+}
+
 resource "aws_s3_bucket_logging" "student_bucket_logging" {
   bucket        = aws_s3_bucket.student_data_bucket.id
-  target_bucket = aws_s3_bucket.student_data_bucket.id
+  target_bucket = aws_s3_bucket.logging_bucket.id
   target_prefix = "logs/"
 }
