@@ -163,36 +163,42 @@ pipeline {
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     script {
-                        def result = sh(
-                            script: '''#!/bin/bash
-                            SNYK_PATH=$(which snyk || echo /usr/local/bin/snyk)
-                            if [ ! -f "$SNYK_PATH" ]; then
-                                echo "❌ snyk command not found at /usr/local/bin/snyk!"
-                                exit 1
-                            fi
-                            $SNYK_PATH test target_repo --json 2>&1 | tee snyk_report.json
-                            SNYK_EXIT=${PIPESTATUS[0]}
-                            $SNYK_PATH test target_repo 2>&1 | tee snyk_report.txt
-                            exit $SNYK_EXIT
-                            ''',
-                            returnStatus: true
-                        )
-                        if (result != 0) {
-                            env.STAGE_SNYK = 'FAILED'
-                            env.DETAIL_SNYK = 'Dependency vulnerabilities detected by Snyk'
-                            def snykOut = ''
-                            if (fileExists('snyk_report.txt')) {
-                                snykOut = readFile('snyk_report.txt').take(8000)
-                            } else if (fileExists('snyk_report.json')) {
-                                snykOut = readFile('snyk_report.json').take(8000)
+                        withCredentials([string(credentialsId: 'snyk-auth-token', variable: 'SNYK_TOKEN')]) {
+                            def result = sh(
+                                script: '''#!/bin/bash
+                                SNYK_PATH=$(which snyk || echo /usr/local/bin/snyk)
+                                if [ ! -f "$SNYK_PATH" ]; then
+                                    echo "❌ snyk command not found at /usr/local/bin/snyk!"
+                                    exit 1
+                                fi
+                                
+                                # Authenticate Snyk
+                                $SNYK_PATH auth $SNYK_TOKEN
+                                
+                                $SNYK_PATH test target_repo --json 2>&1 | tee snyk_report.json
+                                SNYK_EXIT=${PIPESTATUS[0]}
+                                $SNYK_PATH test target_repo 2>&1 | tee snyk_report.txt
+                                exit $SNYK_EXIT
+                                ''',
+                                returnStatus: true
+                            )
+                            if (result != 0) {
+                                env.STAGE_SNYK = 'FAILED'
+                                env.DETAIL_SNYK = 'Dependency vulnerabilities detected by Snyk'
+                                def snykOut = ''
+                                if (fileExists('snyk_report.txt')) {
+                                    snykOut = readFile('snyk_report.txt').take(8000)
+                                } else if (fileExists('snyk_report.json')) {
+                                    snykOut = readFile('snyk_report.json').take(8000)
+                                } else {
+                                    snykOut = 'Snyk scan failed - no report generated.'
+                                }
+                                _logError('SCA (Snyk)', snykOut)
+                                error("Snyk found vulnerabilities")
                             } else {
-                                snykOut = 'Snyk scan failed - no report generated.'
+                                env.STAGE_SNYK = 'PASSED'
+                                env.DETAIL_SNYK = 'No dependency vulnerabilities found'
                             }
-                            _logError('SCA (Snyk)', snykOut)
-                            error("Snyk found vulnerabilities")
-                        } else {
-                            env.STAGE_SNYK = 'PASSED'
-                            env.DETAIL_SNYK = 'No dependency vulnerabilities found'
                         }
                         echo "✅ No Snyk vulnerabilities found."
                     }
