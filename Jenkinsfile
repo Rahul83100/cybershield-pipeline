@@ -351,10 +351,10 @@ Do NOT skip or omit any failed stages.
  */
 def _getStageStatusJson() {
     return """[
-    {"name": "Secrets (TruffleHog)", "status": "${env.STAGE_TRUFFLEHOG}", "detail": "${(env.DETAIL_TRUFFLEHOG ?: '').replaceAll('"', '\\\\"')}"},
-    {"name": "SAST (SonarQube)", "status": "${env.STAGE_SONARQUBE}", "detail": "${(env.DETAIL_SONARQUBE ?: '').replaceAll('"', '\\\\"')}"},
-    {"name": "SCA – Snyk", "status": "${env.STAGE_SNYK}", "detail": "${(env.DETAIL_SNYK ?: '').replaceAll('"', '\\\\"')}"},
-    {"name": "IaC (Checkov)", "status": "${env.STAGE_CHECKOV}", "detail": "${(env.DETAIL_CHECKOV ?: '').replaceAll('"', '\\\\"')}"}
+    {"name": "Secrets (TruffleHog)", "status": "${env.STAGE_TRUFFLEHOG}", "detail": "${(env.DETAIL_TRUFFLEHOG ?: '').replaceAll('"', '\\\\"').replaceAll('\n', ' ').replaceAll('\r', '').replaceAll('\t', ' ')}"},
+    {"name": "SAST (SonarQube)", "status": "${env.STAGE_SONARQUBE}", "detail": "${(env.DETAIL_SONARQUBE ?: '').replaceAll('"', '\\\\"').replaceAll('\n', ' ').replaceAll('\r', '').replaceAll('\t', ' ')}"},
+    {"name": "SCA – Snyk", "status": "${env.STAGE_SNYK}", "detail": "${(env.DETAIL_SNYK ?: '').replaceAll('"', '\\\\"').replaceAll('\n', ' ').replaceAll('\r', '').replaceAll('\t', ' ')}"},
+    {"name": "IaC (Checkov)", "status": "${env.STAGE_CHECKOV}", "detail": "${(env.DETAIL_CHECKOV ?: '').replaceAll('"', '\\\\"').replaceAll('\n', ' ').replaceAll('\r', '').replaceAll('\t', ' ')}"}
 ]"""
 }
 
@@ -648,7 +648,7 @@ def _openAiCall(String prompt) {
 
     def result = sh(script: '''#!/bin/bash
 set +e
-python3 "${WORKSPACE}/scripts/openai_query.py" "''' + promptFile + '''"
+python3 "${WORKSPACE}/scripts/openai_query.py" "''' + promptFile + '''" 2>&1
 ''',
     returnStdout: true).trim()
 
