@@ -14,7 +14,6 @@ pipeline {
     parameters {
         string(name: 'REPO_URL', defaultValue: '', description: 'GitHub Repository URL to scan (HTTPS format)')
         string(name: 'BRANCH_NAME', defaultValue: 'main', description: 'Branch to scan (e.g., main, develop)')
-        password(name: 'OPENAI_API_KEY', defaultValue: '', description: 'Securely inject OpenAI API Key (starts with sk-...)')
     }
 
     environment {
@@ -23,6 +22,9 @@ pipeline {
 
         ERROR_FILE      = "${WORKSPACE}/scan_errors.txt"
         REPORT_FILE     = "${WORKSPACE}/ai_security_audit.html"
+        
+        // This securely loads the API key from Jenkins without showing developers
+        OPENAI_API_KEY  = credentials('openai-api-key')
     }
 
     options {
