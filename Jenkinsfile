@@ -12,7 +12,7 @@ pipeline {
     agent any
 
     parameters {
-        string(name: 'REPO_URL', defaultValue: '', description: 'GitHub Repository URL to scan (HTTPS format)')
+        string(name: 'REPO_URL', defaultValue: '', description: 'Repository URL to scan (e.g., https://gitlab.christuniversity.in/...)')
         string(name: 'BRANCH_NAME', defaultValue: 'main', description: 'Branch to scan (e.g., main, develop)')
     }
 
@@ -67,7 +67,13 @@ pipeline {
                         }
                         echo "⬇️ Cloning ${params.REPO_URL} (Branch: ${params.BRANCH_NAME}) into target_repo..."
                         dir('target_repo') {
+                        try {
+                            // Uses GitLab credentials if defined
+                            git branch: "${params.BRANCH_NAME}", url: "${params.REPO_URL}", credentialsId: 'gitlab-credentials'
+                        } catch (err) {
+                            // Fallback to public clone if credentials not setup
                             git branch: "${params.BRANCH_NAME}", url: "${params.REPO_URL}"
+                        }
                         }
                     }
                     echo "✅ Source code checked out."
@@ -129,7 +135,7 @@ pipeline {
                                         -Dsonar.projectName="Students IMS" \
                                         -Dsonar.sources=target_repo \
                                         -Dsonar.exclusions=node_modules/**,**/*.test.js,.git/**,*.json \
-                                        -Dsonar.host.url=http://68.183.93.244:9000 \
+                                        -Dsonar.host.url=http://localhost:9000 \
                                         2>&1 | tee sonar_output.txt
                                 """
                             }
