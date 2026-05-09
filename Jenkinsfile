@@ -180,7 +180,12 @@ pipeline {
                                 
                                 # Authenticate Snyk
                                 $SNYK_PATH auth $SNYK_TOKEN
-                                
+
+                                # Install dependencies so Snyk can analyse them
+                                if [ -f target_repo/package.json ]; then
+                                    cd target_repo && npm install --quiet 2>/dev/null || true && cd ..
+                                fi
+
                                 $SNYK_PATH test target_repo --json 2>&1 | tee snyk_report.json
                                 SNYK_EXIT=${PIPESTATUS[0]}
                                 $SNYK_PATH test target_repo 2>&1 | tee snyk_report.txt
