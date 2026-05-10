@@ -1,7 +1,7 @@
 // ============================================================
 // AI-Enhanced DevSecOps Pipeline — AI Cybersecurity Shield
 // ============================================================
-// Gemini 2.5 Flash performs DEEP vulnerability analysis beyond
+// Claude Opus 4.7 performs DEEP vulnerability analysis beyond
 // what tools detect. Generates a premium HTML audit report
 // with flowcharts, code snippets, and remediation roadmap.
 // AI is ADVISOR ONLY — never modifies code.
@@ -24,7 +24,7 @@ pipeline {
         REPORT_FILE     = "${WORKSPACE}/ai_security_audit.html"
         
         // This securely loads the API key from Jenkins without showing developers
-        OPENAI_API_KEY  = credentials('openai-api-key')
+        ANTHROPIC_API_KEY = credentials('anthropic-api-key')
     }
 
     options {
@@ -268,7 +268,7 @@ pipeline {
 
                     echo "============================================"
                     echo "  🛡️  PHASE 4: AI CYBERSECURITY SHIELD"
-                    echo "  Engine: Gemini 2.5 Flash"
+                    echo "  Engine: Claude Opus 4.7"
                     echo "  Role: Deep Analysis + Advisory Only"
                     echo "============================================"
 
@@ -611,7 +611,7 @@ REMEMBER:
 - Be thorough, specific, and actionable
 """
 
-    echo "🧠 Calling OpenAI o3-mini Reasoning Model for deep security analysis..."
+    echo "🧠 Calling Anthropic Claude Opus 4.7 for deep security analysis..."
     def aiOutput = _openAiCall(prompt)
 
     def timestamp = new Date().format("yyyy-MM-dd HH:mm:ss")
@@ -667,12 +667,12 @@ def _openAiCall(String prompt) {
 
     def result = sh(script: '''#!/bin/bash
 set +e
-python3 "${WORKSPACE}/scripts/openai_query.py" "''' + promptFile + '''" 2>&1
+python3 "${WORKSPACE}/scripts/anthropic_query.py" "''' + promptFile + '''" 2>&1
 ''',
     returnStdout: true).trim()
 
     // Clean up
     sh "rm -f ${promptFile}"
 
-    return result ?: "⚠️ OpenAI API returned no content. Check connectivity and quota."
+    return result ?: "⚠️ Anthropic API returned no content. Check connectivity and quota."
 }
