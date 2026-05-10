@@ -24,7 +24,7 @@ pipeline {
         REPORT_FILE     = "${WORKSPACE}/ai_security_audit.html"
         
         // This securely loads the API key from Jenkins without showing developers
-        ANTHROPIC_API_KEY = credentials('anthropic-api-key')
+        ANTHROPIC_API_KEY = credentials('anthropic_api_key')
     }
 
     options {
