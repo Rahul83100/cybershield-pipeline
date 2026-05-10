@@ -14,6 +14,7 @@ pipeline {
     parameters {
         string(name: 'REPO_URL', defaultValue: '', description: 'Repository URL to scan (e.g., https://gitlab.christuniversity.in/...)')
         string(name: 'BRANCH_NAME', defaultValue: 'main', description: 'Branch to scan (e.g., main, develop)')
+        booleanParam(name: 'ENABLE_AI_LAYER', defaultValue: false, description: 'Request AI-powered deep analysis (requires admin approval before it runs)')
     }
 
     environment {
@@ -47,6 +48,7 @@ pipeline {
                     env.STAGE_SONARQUBE  = 'NOT_RUN'
                     env.STAGE_SNYK       = 'NOT_RUN'
                     env.STAGE_CHECKOV    = 'NOT_RUN'
+                    env.AI_APPROVED      = 'false'
                     // Detail messages for each stage
                     env.DETAIL_TRUFFLEHOG = ''
                     env.DETAIL_SONARQUBE  = ''
@@ -259,10 +261,67 @@ pipeline {
             }
         }
 
+        // ── AI Layer: Admin Approval Gate ────────────────────────────────
+        stage('AI Layer: Request Admin Approval') {
+            when {
+                expression { params.ENABLE_AI_LAYER == true }
+            }
+            steps {
+                script {
+                    echo "🔐 AI Layer requested — sending approval request to admin..."
+
+                    try {
+                        mail(
+                            to: env.ADMIN_EMAIL,
+                            subject: "🔐 AI Scan Approval Request — ${params.REPO_URL}",
+                            body: """\
+A developer has requested the AI Cybersecurity Shield for:
+
+  Repository : ${params.REPO_URL}
+  Branch     : ${params.BRANCH_NAME}
+  Build      : ${BUILD_URL}
+
+To approve or deny, visit:
+  ${BUILD_URL}input
+
+This request will expire in 24 hours if not actioned.
+"""
+                        )
+                        echo "📧 Approval request emailed to ${env.ADMIN_EMAIL}"
+                    } catch (e) {
+                        echo "⚠️ Email notification failed (check Jenkins SMTP config): ${e.message}"
+                        echo "📋 Admin can still approve manually at: ${BUILD_URL}input"
+                    }
+
+                    try {
+                        timeout(time: 24, unit: 'HOURS') {
+                            input(
+                                id: 'aiApproval',
+                                message: "Approve AI Cybersecurity Shield scan?\n\nRepo: ${params.REPO_URL}\nBranch: ${params.BRANCH_NAME}",
+                                submitter: 'admin',
+                                ok: 'Approve AI Scan'
+                            )
+                        }
+                        env.AI_APPROVED = 'true'
+                        echo "✅ AI scan approved by admin."
+                    } catch (err) {
+                        env.AI_APPROVED = 'false'
+                        echo "❌ AI scan request denied or timed out — skipping AI layer."
+                    }
+                }
+            }
+        }
+
         // ══════════════════════════════════════════════════════════════════
-        // Phase 4: AI CYBERSECURITY SHIELD (Gemini 2.5 Flash — Deep Analysis)
+        // Phase 4: AI CYBERSECURITY SHIELD (Claude Sonnet 4.6 — Deep Analysis)
         // ══════════════════════════════════════════════════════════════════
         stage('Phase 4: AI Cybersecurity Shield') {
+            when {
+                allOf {
+                    expression { params.ENABLE_AI_LAYER == true }
+                    expression { env.AI_APPROVED == 'true' }
+                }
+            }
             steps {
                 script {
 
