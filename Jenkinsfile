@@ -14,7 +14,7 @@ pipeline {
     parameters {
         string(name: 'REPO_URL', defaultValue: '', description: 'Repository URL to scan (e.g., https://gitlab.christuniversity.in/...)')
         string(name: 'BRANCH_NAME', defaultValue: 'main', description: 'Branch to scan (e.g., main, develop)')
-        booleanParam(name: 'ENABLE_AI_LAYER', defaultValue: false, description: 'Request AI-powered deep analysis (requires admin approval before it runs)')
+        booleanParam(name: 'REQUEST_AI_LAYER', defaultValue: false, description: 'Check to request AI-powered deep analysis — admin must approve in Jenkins before it runs')
     }
 
     environment {
@@ -264,7 +264,7 @@ pipeline {
         // ── AI Layer: Admin Approval Gate ────────────────────────────────
         stage('AI Layer: Request Admin Approval') {
             when {
-                expression { params.ENABLE_AI_LAYER == true }
+                expression { params.REQUEST_AI_LAYER == true }
             }
             steps {
                 script {
@@ -318,7 +318,7 @@ This request will expire in 24 hours if not actioned.
         stage('Phase 4: AI Cybersecurity Shield') {
             when {
                 allOf {
-                    expression { params.ENABLE_AI_LAYER == true }
+                    expression { params.REQUEST_AI_LAYER == true }
                     expression { env.AI_APPROVED == 'true' }
                 }
             }
