@@ -1,7 +1,7 @@
 // ============================================================
 // AI-Enhanced DevSecOps Pipeline — AI Cybersecurity Shield
 // ============================================================
-// Claude Opus 4.7 performs DEEP vulnerability analysis beyond
+// Claude Sonnet 4.6 performs DEEP vulnerability analysis beyond
 // what tools detect. Generates a premium HTML audit report
 // with flowcharts, code snippets, and remediation roadmap.
 // AI is ADVISOR ONLY — never modifies code.
@@ -268,7 +268,7 @@ pipeline {
 
                     echo "============================================"
                     echo "  🛡️  PHASE 4: AI CYBERSECURITY SHIELD"
-                    echo "  Engine: Claude Opus 4.7"
+                    echo "  Engine: Claude Sonnet 4.6"
                     echo "  Role: Deep Analysis + Advisory Only"
                     echo "============================================"
 
@@ -611,7 +611,7 @@ REMEMBER:
 - Be thorough, specific, and actionable
 """
 
-    echo "🧠 Calling Anthropic Claude Opus 4.7 for deep security analysis..."
+    echo "🧠 Calling Anthropic Claude Sonnet 4.6 for deep security analysis..."
     def aiOutput = _openAiCall(prompt)
 
     def timestamp = new Date().format("yyyy-MM-dd HH:mm:ss")

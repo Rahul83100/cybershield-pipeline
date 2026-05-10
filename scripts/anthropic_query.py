@@ -27,7 +27,7 @@ def query_anthropic(prompt_file):
     )
 
     payload = {
-        "model": "claude-opus-4-7",
+        "model": "claude-sonnet-4-6",
         "max_tokens": 4096,
         "system": system_prompt,
         "messages": [
