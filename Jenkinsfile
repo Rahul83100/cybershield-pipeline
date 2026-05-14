@@ -54,7 +54,17 @@ pipeline {
                     env.DETAIL_SONARQUBE  = ''
                     env.DETAIL_SNYK       = ''
                     env.DETAIL_CHECKOV    = ''
-                    echo "✅ Workspace cleaned and pipeline initialised."
+                    // Derive dynamic SonarQube project key from repo URL
+                    // e.g. https://github.com/user/repo.git → user_repo
+                    if (params.REPO_URL) {
+                        def raw = params.REPO_URL.replaceAll('\\.git$', '').replaceAll('^https?://', '').replaceAll('^git@', '').replaceAll(':', '/').replaceAll('/', '_').replaceAll('[^a-zA-Z0-9_.-]', '_')
+                        env.SONAR_PROJECT_KEY = raw
+                        env.SONAR_PROJECT_NAME = raw
+                    } else {
+                        env.SONAR_PROJECT_KEY = 'default_project'
+                        env.SONAR_PROJECT_NAME = 'Default Project'
+                    }
+                    echo "✅ Workspace cleaned and pipeline initialised. SonarQube project: ${env.SONAR_PROJECT_KEY}"
                 }
             }
         }
@@ -88,8 +98,13 @@ pipeline {
             }
         }
 
-        // ── Secrets Scanning (Trufflehog) ─────────────────────────────────
-        stage('Phase 2: Secrets Scanning (Trufflehog)') {
+        // ══════════════════════════════════════════════════════════════════
+        // Phase 2-3: All 4 tools run in PARALLEL (read-only on target_repo)
+        // ══════════════════════════════════════════════════════════════════
+        stage('Phase 2-3: Parallel Tools Scan') {
+            parallel {
+                // ── Secrets Scanning (Trufflehog) ─────────────────────────────────
+                stage('Secrets (Trufflehog)') {
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     script {
@@ -123,7 +138,7 @@ pipeline {
         }
 
         // ── SAST (SonarQube) ──────────────────────────────────────────────
-        stage('Phase 2: SAST (SonarQube)') {
+        stage('SAST (SonarQube)') {
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     script {
@@ -133,8 +148,8 @@ pipeline {
                                 sh """
                                     echo "🔍 Running SonarQube SAST scan..."
                                     ${scannerHome}/bin/sonar-scanner \
-                                        -Dsonar.projectKey=students_tasks \
-                                        -Dsonar.projectName="Students IMS" \
+                                        -Dsonar.projectKey=${env.SONAR_PROJECT_KEY} \
+                                        -Dsonar.projectName="${env.SONAR_PROJECT_NAME}" \
                                         -Dsonar.sources=target_repo \
                                         -Dsonar.exclusions=node_modules/**,**/*.test.js,.git/**,*.json \
                                         -Dsonar.host.url=http://localhost:9000 \
@@ -167,7 +182,7 @@ pipeline {
         }
 
         // ── SCA (Snyk) ────────────────────────────────────────────────────
-        stage('Phase 2: SCA (Snyk)') {
+        stage('SCA (Snyk)') {
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     script {
@@ -229,7 +244,7 @@ pipeline {
         }
 
         // ── IaC Scanning (Checkov) ────────────────────────────────────────
-        stage('Phase 3: IaC Scanning (Checkov)') {
+        stage('IaC (Checkov)') {
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     script {
@@ -269,6 +284,8 @@ pipeline {
                 }
             }
         }
+            }  // end parallel
+        }  // end Phase 2-3: Parallel Tools Scan
 
         // ── AI Layer: Admin Approval Gate ────────────────────────────────
         stage('AI Layer: Request Admin Approval') {
