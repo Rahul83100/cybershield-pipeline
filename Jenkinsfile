@@ -156,7 +156,7 @@ pipeline {
                                         2>&1 | tee sonar_output.txt
                                 """
                             }
-                            timeout(time: 10, unit: 'MINUTES') {
+                            timeout(time: 20, unit: 'MINUTES') {
                                 def qg = waitForQualityGate()
                                 if (qg.status != 'OK') {
                                     env.STAGE_SONARQUBE = 'FAILED'
