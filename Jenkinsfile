@@ -137,7 +137,8 @@ pipeline {
             }
         }
 
-        // ── SAST (SonarQube) ──────────────────────────────────────────────
+        // ── SAST (SonarQube Scanner — NO waitForQualityGate here) ──────────
+        // waitForQualityGate runs AFTER the parallel block (see Phase 3 below)
         stage('SAST (SonarQube)') {
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
@@ -155,18 +156,12 @@ pipeline {
                                     2>&1 | tee sonar_output.txt
                             """
                         }
-                        timeout(time: 20, unit: 'MINUTES') {
-                            def qg = waitForQualityGate()
-                            if (qg.status != 'OK') {
-                                env.STAGE_SONARQUBE = 'FAILED'
-                                env.DETAIL_SONARQUBE = "Quality Gate FAILED: ${qg.status}"
-                                _logError('SAST (SonarQube)', "SonarQube Quality Gate FAILED: ${qg.status}")
-                                error("SonarQube Quality Gate FAILED: ${qg.status}")
-                            } else {
-                                env.STAGE_SONARQUBE = 'PASSED'
-                                env.DETAIL_SONARQUBE = 'Quality Gate passed'
-                            }
-                        }
+                        // Mark scanner as done — Quality Gate is checked in the
+                        // sequential stage after all parallel tools finish.
+                        env.SONAR_CE_TASK_ID = sh(script: "grep -oP 'id=\\K[A-Za-z0-9_]+' sonar_output.txt | tail -1", returnStdout: true).trim()
+                        echo "📤 SonarQube report uploaded. CE task: ${env.SONAR_CE_TASK_ID}"
+                        env.STAGE_SONARQUBE = 'PASSED'
+                        env.DETAIL_SONARQUBE = 'Scanner uploaded successfully'
                     }
                 }
             }
@@ -277,6 +272,35 @@ pipeline {
         }
             }  // end parallel
         }  // end Phase 2-3: Parallel Tools Scan
+
+        // ── SonarQube Quality Gate (sequential — must NOT be in parallel) ──
+        stage('SonarQube Quality Gate') {
+            steps {
+                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                    script {
+                        if (env.SONAR_CE_TASK_ID) {
+                            echo "⏳ Waiting for SonarQube CE task: ${env.SONAR_CE_TASK_ID}"
+                            timeout(time: 20, unit: 'MINUTES') {
+                                def qg = waitForQualityGate()
+                                if (qg.status != 'OK') {
+                                    env.STAGE_SONARQUBE = 'FAILED'
+                                    env.DETAIL_SONARQUBE = "Quality Gate FAILED: ${qg.status}"
+                                    _logError('SAST (SonarQube)', "SonarQube Quality Gate FAILED: ${qg.status}")
+                                    error("SonarQube Quality Gate FAILED: ${qg.status}")
+                                } else {
+                                    env.STAGE_SONARQUBE = 'PASSED'
+                                    env.DETAIL_SONARQUBE = 'Quality Gate passed'
+                                }
+                            }
+                        } else {
+                            echo "⏭️ SonarQube Quality Gate skipped — no CE task ID found."
+                            env.STAGE_SONARQUBE = 'PASSED'
+                            env.DETAIL_SONARQUBE = 'Quality Gate skipped (no scanner output)'
+                        }
+                    }
+                }
+            }
+        }
 
         // ── AI Layer: Admin Approval Gate ────────────────────────────────
         stage('AI Layer: Request Admin Approval') {
