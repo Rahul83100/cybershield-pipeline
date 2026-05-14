@@ -142,39 +142,30 @@ pipeline {
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     script {
-                        try {
-                            def scannerHome = tool name: 'SonarScanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
-                            withSonarQubeEnv('SonarQube') {
-                                sh """
-                                    echo "🔍 Running SonarQube SAST scan..."
-                                    ${scannerHome}/bin/sonar-scanner \
-                                        -Dsonar.projectKey=${env.SONAR_PROJECT_KEY} \
-                                        -Dsonar.projectName="${env.SONAR_PROJECT_NAME}" \
-                                        -Dsonar.sources=target_repo \
-                                        -Dsonar.exclusions=node_modules/**,**/*.test.js,.git/**,*.json \
-                                        -Dsonar.host.url=http://localhost:9000 \
-                                        2>&1 | tee sonar_output.txt
-                                """
+                        def scannerHome = tool name: 'SonarScanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+                        withSonarQubeEnv('SonarQube') {
+                            sh """
+                                echo "🔍 Running SonarQube SAST scan..."
+                                ${scannerHome}/bin/sonar-scanner \
+                                    -Dsonar.projectKey=${env.SONAR_PROJECT_KEY} \
+                                    -Dsonar.projectName="${env.SONAR_PROJECT_NAME}" \
+                                    -Dsonar.sources=target_repo \
+                                    -Dsonar.exclusions=node_modules/**,**/*.test.js,.git/**,*.json \
+                                    -Dsonar.host.url=http://localhost:9000 \
+                                    2>&1 | tee sonar_output.txt
+                            """
+                        }
+                        timeout(time: 20, unit: 'MINUTES') {
+                            def qg = waitForQualityGate()
+                            if (qg.status != 'OK') {
+                                env.STAGE_SONARQUBE = 'FAILED'
+                                env.DETAIL_SONARQUBE = "Quality Gate FAILED: ${qg.status}"
+                                _logError('SAST (SonarQube)', "SonarQube Quality Gate FAILED: ${qg.status}")
+                                error("SonarQube Quality Gate FAILED: ${qg.status}")
+                            } else {
+                                env.STAGE_SONARQUBE = 'PASSED'
+                                env.DETAIL_SONARQUBE = 'Quality Gate passed'
                             }
-                            timeout(time: 20, unit: 'MINUTES') {
-                                def qg = waitForQualityGate()
-                                if (qg.status != 'OK') {
-                                    env.STAGE_SONARQUBE = 'FAILED'
-                                    env.DETAIL_SONARQUBE = "Quality Gate FAILED: ${qg.status}"
-                                    def msg = "SonarQube Quality Gate FAILED: ${qg.status}"
-                                    _logError('SAST (SonarQube)', msg)
-                                    error(msg)
-                                } else {
-                                    env.STAGE_SONARQUBE = 'PASSED'
-                                    env.DETAIL_SONARQUBE = 'Quality Gate passed'
-                                }
-                            }
-                        } catch (err) {
-                            env.STAGE_SONARQUBE = 'FAILED'
-                            env.DETAIL_SONARQUBE = err.getMessage()?.take(200) ?: 'SonarQube analysis failed'
-                            def sonarOut = fileExists('sonar_output.txt') ? readFile('sonar_output.txt').take(5000) : err.getMessage()
-                            _logError('SAST (SonarQube)', sonarOut)
-                            throw err
                         }
                     }
                 }
