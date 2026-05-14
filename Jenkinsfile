@@ -98,7 +98,7 @@ pipeline {
                             script: """
                                 set +e
                                 echo "🔍 Running Trufflehog secrets scan..."
-                                ${trufflehogPath} filesystem "${WORKSPACE}/target_repo" --exclude-paths=.trufflehog-ignore --json > trufflehog_report.json 2>&1
+                                ${trufflehogPath} filesystem "${WORKSPACE}/target_repo" --exclude-paths=.trufflehog-ignore --json --no-update > trufflehog_report.json 2>trufflehog_stderr.txt
                                 if grep -q '"verified":true' trufflehog_report.json 2>/dev/null; then
                                     echo "[SECRETS_FOUND]"
                                     exit 1
@@ -171,49 +171,58 @@ pipeline {
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     script {
-                        withCredentials([string(credentialsId: 'snyk-auth-token', variable: 'SNYK_TOKEN')]) {
-                            def result = sh(
-                                script: '''#!/bin/bash
-                                SNYK_PATH=$(which snyk || echo /usr/local/bin/snyk)
-                                if [ ! -f "$SNYK_PATH" ]; then
-                                    echo "❌ snyk command not found at /usr/local/bin/snyk!"
-                                    exit 1
-                                fi
-                                
-                                # Authenticate Snyk
-                                $SNYK_PATH auth $SNYK_TOKEN
+                        // Skip Snyk if the target repo has no package.json — Snyk needs
+                        // node_modules to build a dependency tree, and without
+                        // package.json there is nothing for it to scan.
+                        if (!fileExists('target_repo/package.json') && !fileExists('target_repo/package-lock.json') && !fileExists('target_repo/yarn.lock')) {
+                            env.STAGE_SNYK = 'SKIPPED'
+                            env.DETAIL_SNYK = 'No package.json or lock file found — not a Node.js project'
+                            echo "⏭️  Snyk skipped — no package.json, package-lock.json, or yarn.lock found in target repo."
+                        } else {
+                            withCredentials([string(credentialsId: 'snyk-auth-token', variable: 'SNYK_TOKEN')]) {
+                                def result = sh(
+                                    script: '''#!/bin/bash
+                                    SNYK_PATH=$(which snyk || echo /usr/local/bin/snyk)
+                                    if [ ! -f "$SNYK_PATH" ]; then
+                                        echo "❌ snyk command not found at /usr/local/bin/snyk!"
+                                        exit 1
+                                    fi
 
-                                # Install dependencies so Snyk can analyse them
-                                if [ -f target_repo/package.json ]; then
-                                    cd target_repo && npm install --quiet 2>/dev/null || true && cd ..
-                                fi
+                                    # Authenticate Snyk
+                                    $SNYK_PATH auth $SNYK_TOKEN
 
-                                $SNYK_PATH test target_repo --json 2>&1 | tee snyk_report.json
-                                SNYK_EXIT=${PIPESTATUS[0]}
-                                $SNYK_PATH test target_repo 2>&1 | tee snyk_report.txt
-                                exit $SNYK_EXIT
-                                ''',
-                                returnStatus: true
-                            )
-                            if (result != 0) {
-                                env.STAGE_SNYK = 'FAILED'
-                                env.DETAIL_SNYK = 'Dependency vulnerabilities detected by Snyk'
-                                def snykOut = ''
-                                if (fileExists('snyk_report.txt')) {
-                                    snykOut = readFile('snyk_report.txt').take(8000)
-                                } else if (fileExists('snyk_report.json')) {
-                                    snykOut = readFile('snyk_report.json').take(8000)
+                                    # Install dependencies so Snyk can analyse them
+                                    if [ -f target_repo/package.json ]; then
+                                        cd target_repo && npm install --quiet 2>/dev/null || true && cd ..
+                                    fi
+
+                                    $SNYK_PATH test target_repo --json 2>&1 | tee snyk_report.json
+                                    SNYK_EXIT=${PIPESTATUS[0]}
+                                    $SNYK_PATH test target_repo 2>&1 | tee snyk_report.txt
+                                    exit $SNYK_EXIT
+                                    ''',
+                                    returnStatus: true
+                                )
+                                if (result != 0) {
+                                    env.STAGE_SNYK = 'FAILED'
+                                    env.DETAIL_SNYK = 'Dependency vulnerabilities detected by Snyk'
+                                    def snykOut = ''
+                                    if (fileExists('snyk_report.txt')) {
+                                        snykOut = readFile('snyk_report.txt').take(8000)
+                                    } else if (fileExists('snyk_report.json')) {
+                                        snykOut = readFile('snyk_report.json').take(8000)
+                                    } else {
+                                        snykOut = 'Snyk scan failed - no report generated.'
+                                    }
+                                    _logError('SCA (Snyk)', snykOut)
+                                    error("Snyk found vulnerabilities")
                                 } else {
-                                    snykOut = 'Snyk scan failed - no report generated.'
+                                    env.STAGE_SNYK = 'PASSED'
+                                    env.DETAIL_SNYK = 'No dependency vulnerabilities found'
                                 }
-                                _logError('SCA (Snyk)', snykOut)
-                                error("Snyk found vulnerabilities")
-                            } else {
-                                env.STAGE_SNYK = 'PASSED'
-                                env.DETAIL_SNYK = 'No dependency vulnerabilities found'
                             }
+                            echo "✅ No Snyk vulnerabilities found."
                         }
-                        echo "✅ No Snyk vulnerabilities found."
                     }
                 }
             }
@@ -377,7 +386,7 @@ This request will expire in 24 hours if not actioned.
                 echo "🧹 Cleaning up workspace..."
                 // Archive all debug reports and the final AI report before cleanup
                 try {
-                    archiveArtifacts artifacts: 'scan_errors.txt,ai_security_audit.html,trufflehog_report.json,snyk_report.json,snyk_report.txt,checkov_report.json,checkov_report.txt,sonar_output.txt', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'scan_errors.txt,ai_security_audit.html,trufflehog_report.json,trufflehog_stderr.txt,snyk_report.json,snyk_report.txt,checkov_report.json,checkov_report.txt,sonar_output.txt', allowEmptyArchive: true
                 } catch (e) {
                     echo "Artifact archiving skipped: ${e.message}"
                 }
