@@ -14,6 +14,7 @@ pipeline {
     parameters {
         string(name: 'REPO_URL', defaultValue: '', description: 'Repository URL to scan (e.g., https://gitlab.christuniversity.in/...)')
         string(name: 'BRANCH_NAME', defaultValue: 'main', description: 'Branch to scan (e.g., main, develop)')
+        string(name: 'SCAN_PATH', defaultValue: '', description: 'Optional: specific file or folder path to scan (e.g., src/app.js or ZNF/). Leave empty to scan entire repo.')
         booleanParam(name: 'REQUEST_AI_LAYER', defaultValue: false, description: 'Check to request AI-powered deep analysis — admin must approve in Jenkins before it runs')
     }
 
@@ -86,6 +87,13 @@ pipeline {
                             git branch: "${params.BRANCH_NAME}", url: "${params.REPO_URL}"
                         }
                         }
+                        if (params.SCAN_PATH) {
+                            def pathExists = sh(script: "test -e target_repo/'${params.SCAN_PATH}'", returnStatus: true) == 0
+                            if (!pathExists) {
+                                error("Specified SCAN_PATH 'target_repo/${params.SCAN_PATH}' does not exist!")
+                            }
+                            echo "✅ Validated SCAN_PATH: target_repo/${params.SCAN_PATH} exists."
+                        }
                     }
                     echo "✅ Source code checked out."
                 }
@@ -108,11 +116,15 @@ pipeline {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     script {
                         def trufflehogPath = sh(script: 'which trufflehog || echo /usr/local/bin/trufflehog', returnStdout: true).trim()
+                        def scanTarget = "${WORKSPACE}/target_repo"
+                        if (params.SCAN_PATH) {
+                            scanTarget = "${WORKSPACE}/target_repo/${params.SCAN_PATH}"
+                        }
                         def result = sh(
                             script: """
                                 set +e
-                                echo "🔍 Running Trufflehog secrets scan..."
-                                ${trufflehogPath} filesystem "${WORKSPACE}/target_repo" --exclude-paths=.trufflehog-ignore --json --no-update > trufflehog_report.json 2>trufflehog_stderr.txt
+                                echo "🔍 Running Trufflehog secrets scan on: ${scanTarget}"
+                                ${truffhogPath} filesystem "${scanTarget}" --exclude-paths=.trufflehog-ignore --json --no-update > trufflehog_report.json 2>trufflehog_stderr.txt
                                 if grep -q '"verified":true' trufflehog_report.json 2>/dev/null; then
                                     echo "[SECRETS_FOUND]"
                                     exit 1
@@ -143,6 +155,11 @@ pipeline {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     script {
                         def scannerHome = tool name: 'SonarScanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+                        def sonarInclusions = ""
+                        if (params.SCAN_PATH) {
+                            sonarInclusions = "-Dsonar.inclusions=${params.SCAN_PATH}"
+                            echo "🎯 SonarQube target path: ${params.SCAN_PATH}"
+                        }
                         withSonarQubeEnv('SonarQube') {
                             sh """
                                 echo "🔍 Running SonarQube SAST scan..."
@@ -151,6 +168,7 @@ pipeline {
                                     -Dsonar.projectName="${env.SONAR_PROJECT_NAME}" \
                                     -Dsonar.sources=target_repo \
                                     -Dsonar.exclusions=node_modules/**,**/*.test.js,.git/**,*.json \
+                                    ${sonarInclusions} \
                                     -Dsonar.host.url=http://localhost:9000 \
                                     2>&1 | tee sonar_output.txt
                             """
@@ -233,18 +251,27 @@ pipeline {
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     script {
+                        def scanTarget = "target_repo"
+                        def scanFlag = "-d"
+                        if (params.SCAN_PATH) {
+                            scanTarget = "target_repo/${params.SCAN_PATH}"
+                            def isFile = sh(script: "test -f '${scanTarget}'", returnStatus: true) == 0
+                            if (isFile) {
+                                scanFlag = "-f"
+                            }
+                        }
                         def result = sh(
-                            script: '''#!/bin/bash
-                            CHECKOV_PATH=$(which checkov || echo /usr/local/bin/checkov)
-                            if [ ! -f "$CHECKOV_PATH" ]; then
+                            script: """#!/bin/bash
+                            CHECKOV_PATH=\$(which checkov || echo /usr/local/bin/checkov)
+                            if [ ! -f "\$CHECKOV_PATH" ]; then
                                 echo "❌ checkov command not found at /usr/local/bin/checkov!"
                                 exit 1
                             fi
-                            $CHECKOV_PATH -d target_repo --quiet --skip-check CKV_AWS_144,CKV2_AWS_61,CKV2_AWS_62 -o json 2>&1 | tee checkov_report.json
-                            CHECKOV_EXIT=${PIPESTATUS[0]}
-                            $CHECKOV_PATH -d target_repo --quiet --skip-check CKV_AWS_144,CKV2_AWS_61,CKV2_AWS_62 2>&1 | tee checkov_report.txt
-                            exit $CHECKOV_EXIT
-                            ''',
+                            \$CHECKOV_PATH ${scanFlag} "${scanTarget}" --quiet --skip-check CKV_AWS_144,CKV2_AWS_61,CKV2_AWS_62 -o json 2>&1 | tee checkov_report.json
+                            CHECKOV_EXIT=\${PIPESTATUS[0]}
+                            \$CHECKOV_PATH ${scanFlag} "${scanTarget}" --quiet --skip-check CKV_AWS_144,CKV2_AWS_61,CKV2_AWS_62 2>&1 | tee checkov_report.txt
+                            exit \$CHECKOV_EXIT
+                            """,
                             returnStatus: true
                         )
                         if (result != 0) {
@@ -527,26 +554,39 @@ def _collectToolReports() {
  * Gathers up to 25 code files, capped at 3000 chars each.
  */
 def _collectSourceCode() {
+    def findTarget = "${WORKSPACE}/target_repo"
+    if (params.SCAN_PATH) {
+        findTarget = "${WORKSPACE}/target_repo/${params.SCAN_PATH}"
+    }
     def result = sh(
-        script: '''#!/bin/bash
-        find "${WORKSPACE}" -type f \\
-            \\( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" \\
-               -o -name "*.tf" -o -name "*.yaml" -o -name "*.yml" \\
-               -o -name "*.html" -o -name "*.json" -o -name "*.sh" \\
-               -o -name "*.css" -o -name "*.jsx" -o -name "*.tsx" \\
-               -o -name "Dockerfile" -o -name "docker-compose*.yml" \\) \\
-            ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/.scannerwork/*" \\
-            ! -path "*/vendor/*" ! -name "package-lock.json" \\
-            ! -name "*.min.js" ! -name "*.min.css" \\
-            2>/dev/null | head -25 | while IFS= read -r FILE; do
-                RELATIVE=$(echo "${FILE}" | sed "s|\\${WORKSPACE}/||")
-                echo "--- FILE: ${RELATIVE} ---"
-                head -c 3000 "${FILE}" 2>/dev/null
-                echo ""
-                echo "--- END FILE ---"
-                echo ""
-            done
-        ''',
+        script: """#!/bin/bash
+        if [ -f "${findTarget}" ]; then
+            RELATIVE=\$(echo "${findTarget}" | sed "s|${WORKSPACE}/||")
+            echo "--- FILE: \${RELATIVE} ---"
+            head -c 3000 "${findTarget}" 2>/dev/null
+            echo ""
+            echo "--- END FILE ---"
+            echo ""
+        else
+            find "${findTarget}" -type f \\
+                \\( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" \\
+                   -o -name "*.tf" -o -name "*.yaml" -o -name "*.yml" \\
+                   -o -name "*.html" -o -name "*.json" -o -name "*.sh" \\
+                   -o -name "*.css" -o -name "*.jsx" -o -name "*.tsx" \\
+                   -o -name "Dockerfile" -o -name "docker-compose*.yml" \\) \\
+                ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/.scannerwork/*" \\
+                ! -path "*/vendor/*" ! -name "package-lock.json" \\
+                ! -name "*.min.js" ! -name "*.min.css" \\
+                2>/dev/null | head -25 | while IFS= read -r FILE; do
+                    RELATIVE=\$(echo "\${FILE}" | sed "s|${WORKSPACE}/||")
+                    echo "--- FILE: \${RELATIVE} ---"
+                    head -c 3000 "\${FILE}" 2>/dev/null
+                    echo ""
+                    echo "--- END FILE ---"
+                    echo ""
+                done
+        fi
+        """,
         returnStdout: true
     ).trim()
 

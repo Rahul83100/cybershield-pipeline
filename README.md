@@ -89,10 +89,10 @@ pip3 install checkov
 ### Step 3: Run SonarQube Locally
 Start SonarQube using Docker.
 ```bash
-docker run -d --name sonarqube -p 9000:9000 sonarqube:lts-community
+docker run -d --name sonarqube -p 3000:9000 --restart unless-stopped sonarqube:lts-community
 ```
 1. Wait a few minutes for the server to spin up.
-2. Visit `http://localhost:9000` in your browser.
+2. Visit `http://localhost:3000` in your browser.
 3. Login with default credentials: `admin` / `admin` (it will ask you to change the password).
 4. Go to **Administration -> Security -> Users -> Tokens**.
 5. Generate a new token. **Save this token**, you will need it for Jenkins!
@@ -115,13 +115,13 @@ The pipeline relies on several credentials and server configurations.
     *   Go to **Manage Jenkins -> System**.
     *   Scroll down to **SonarQube servers**. Click "Add SonarQube".
     *   Name: `SonarQube`
-    *   Server URL: `http://host.docker.internal:9000` (Use this if Jenkins is in Docker and SonarQube is in another Docker container on Mac/Windows, otherwise use the actual IP).
+    *   Server URL: `http://host.docker.internal:3000` (Use this if Jenkins is in Docker and SonarQube is in another Docker container on Mac/Windows, otherwise use the actual IP).
     *   Server authentication token: Add a new "Secret text" credential containing the SonarQube token you generated in Step 3. Select it from the dropdown. Save.
 
 2.  **Configure SonarQube Scanner Tool:**
     *   Go to **Manage Jenkins -> Tools**.
     *   Scroll down to **SonarQube Scanner**. Click "Add SonarQube Scanner".
-    *   Name: `SonarQubeScanner` (Must perfectly match the name in your Jenkinsfile: `def scannerHome = tool 'SonarQubeScanner'`).
+    *   Name: `SonarScanner` (Must perfectly match the name in your Jenkinsfile: `def scannerHome = tool 'SonarScanner'`).
     *   Check "Install automatically". Save.
 
 3.  **Add Sensitive Credentials:**
