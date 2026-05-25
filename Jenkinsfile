@@ -124,7 +124,7 @@ pipeline {
                             script: """
                                 set +e
                                 echo "🔍 Running Trufflehog secrets scan on: ${scanTarget}"
-                                ${truffhogPath} filesystem "${scanTarget}" --exclude-paths=.trufflehog-ignore --json --no-update > trufflehog_report.json 2>trufflehog_stderr.txt
+                                ${trufflehogPath} filesystem "${scanTarget}" --exclude-paths=.trufflehog-ignore --json --no-update > trufflehog_report.json 2>trufflehog_stderr.txt
                                 if grep -q '"verified":true' trufflehog_report.json 2>/dev/null; then
                                     echo "[SECRETS_FOUND]"
                                     exit 1
