@@ -1,0 +1,392 @@
+#!/usr/bin/env python3
+import sys
+import os
+import json
+import time
+import subprocess
+import urllib.request
+import urllib.parse
+import base64
+import re
+from http.cookiejar import CookieJar
+
+# Color codes for premium aesthetics
+GREEN = "\033[32m"
+RED = "\033[31m"
+YELLOW = "\033[33m"
+BLUE = "\033[34m"
+CYAN = "\033[36m"
+GRAY = "\033[90m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+UNDERLINE = "\033[4m"
+
+JENKINS_URL = os.environ.get("JENKINS_URL", "http://13.233.125.248:8080")
+JENKINS_USER = os.environ.get("JENKINS_USER", "admin")
+JENKINS_TOKEN = os.environ.get("JENKINS_TOKEN", "5cfb9dfa923a429dbebda332f02cf571")
+JENKINS_JOB = os.environ.get("JENKINS_JOB", "Christ-DevSecOps-Auditor")
+
+def get_git_remote():
+    try:
+        url = subprocess.check_output(["git", "config", "--get", "remote.origin.url"], stderr=subprocess.DEVNULL)
+        return url.decode().strip()
+    except:
+        return ""
+
+def get_git_branch():
+    try:
+        branch = subprocess.check_output(["git", "branch", "--show-current"], stderr=subprocess.DEVNULL)
+        return branch.decode().strip()
+    except:
+        return "main"
+
+def normalize_url(url, base_url):
+    if not url:
+        return url
+    m = re.match(r"^https?://[^/]+(/?.*)$", url)
+    if m:
+        path = m.group(1)
+        return base_url.rstrip('/') + '/' + path.lstrip('/')
+    return url
+
+# Local scan functions
+def run_local_trufflehog(scan_path):
+    print(f"\n🔑 Running TruffleHog (Secrets) locally on: {scan_path}...")
+    try:
+        cmd = ["trufflehog", "filesystem", scan_path, "--exclude-paths=.trufflehog-ignore", "--json", "--no-update"]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0:
+            if "verified" in proc.stdout or proc.returncode == 1:
+                print(f"{RED}❌ SECRETS FOUND BY TRUFFLEHOG!{RESET}")
+                findings = proc.stdout.split("\n")
+                count = 0
+                for f in findings:
+                    if f.strip() and count < 3:
+                        try:
+                            item = json.loads(f)
+                            print(f"  - Verified: {item.get('verified')} | Source: {item.get('SourceMetadata')}")
+                            count += 1
+                        except:
+                            pass
+                return False
+            else:
+                print(f"{RED}❌ TruffleHog error: {proc.stderr}{RESET}")
+                return False
+        else:
+            print(f"{GREEN}✅ TruffleHog: PASSED — No secrets found.{RESET}")
+            return True
+    except FileNotFoundError:
+        print(f"{YELLOW}⚠️  TruffleHog CLI is not installed locally. Skipping local Secrets scan.{RESET}")
+        print("   Install it via: brew install trufflehog")
+        return None
+
+def run_local_checkov(scan_path):
+    print(f"\n🏗️  Running Checkov (IaC) locally on: {scan_path}...")
+    try:
+        flag = "-f" if os.path.isfile(scan_path) else "-d"
+        cmd = ["checkov", flag, scan_path, "--quiet", "--skip-check", "CKV_AWS_144,CKV2_AWS_61,CKV2_AWS_62"]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0:
+            print(f"{RED}❌ IaC MISCONFIGURATIONS FOUND BY CHECKOV!{RESET}")
+            lines = proc.stdout.split("\n")
+            for line in lines[-10:]:
+                if line.strip():
+                    print(f"  {line}")
+            return False
+        else:
+            print(f"{GREEN}✅ Checkov: PASSED — No misconfigurations found.{RESET}")
+            return True
+    except FileNotFoundError:
+        print(f"{YELLOW}⚠️  Checkov CLI is not installed locally. Skipping local IaC scan.{RESET}")
+        print("   Install it via: pip install checkov")
+        return None
+
+def main():
+    print(f"{CYAN}{BOLD}🛡️  Christ DevSecOps Security Scanner CLI{RESET}")
+    print(f"{GRAY}══════════════════════════════════════════════════════{RESET}")
+    
+    is_local_flag = "--local" in sys.argv or "-l" in sys.argv
+    is_remote_flag = "--remote" in sys.argv or "-r" in sys.argv
+    
+    mode = None
+    if is_local_flag:
+        mode = "2"
+    elif is_remote_flag:
+        mode = "1"
+        
+    if not mode:
+        print("Please select scan mode:")
+        print(f" {BOLD}[1]{RESET} Remote Pipeline Scan (Full 4-tool Scan + AI Shield on Jenkins) {GREEN}(Recommended){RESET}")
+        print(f" {BOLD}[2]{RESET} Local Quick Scan (TruffleHog + Checkov offline)")
+        try:
+            choice = input(f"\nEnter choice [1]: ").strip()
+            if not choice:
+                choice = "1"
+            mode = choice
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            sys.exit(0)
+            
+    if mode == "2":
+        default_path = "."
+        if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+            default_path = sys.argv[1]
+        try:
+            scan_path = input(f"Enter path to scan [default: {default_path}]: ").strip()
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            sys.exit(0)
+        if not scan_path:
+            scan_path = default_path
+            
+        if not os.path.exists(scan_path):
+            print(f"{RED}Error: Path '{scan_path}' does not exist.{RESET}")
+            sys.exit(1)
+            
+        th_res = run_local_trufflehog(scan_path)
+        ck_res = run_local_checkov(scan_path)
+        
+        print(f"\n{GRAY}══════════════════════════════════════════════════════{RESET}")
+        if th_res is False or ck_res is False:
+            print(f"{RED}{BOLD}❌ SCAN FAILED — Security issues detected locally.{RESET}")
+            sys.exit(1)
+        elif th_res is None and ck_res is None:
+            print(f"{YELLOW}{BOLD}⚠️  SCAN SKIPPED — No security tools installed locally.{RESET}")
+            print("Please run remote pipeline scan option to check your repository on Jenkins.")
+            sys.exit(0)
+        else:
+            print(f"{GREEN}{BOLD}✅ SCAN PASSED — No local issues found.{RESET}")
+            sys.exit(0)
+            
+    elif mode == "1":
+        detected_repo = get_git_remote()
+        detected_branch = get_git_branch()
+        
+        try:
+            repo_url = input(f"Please enter the Repository URL to scan [{detected_repo}]: ").strip()
+            if not repo_url:
+                repo_url = detected_repo
+            if not repo_url:
+                print(f"{RED}Error: Repository URL is required.{RESET}")
+                sys.exit(1)
+                
+            branch_name = input(f"Please enter the Branch to scan [{detected_branch}]: ").strip()
+            if not branch_name:
+                branch_name = detected_branch
+                
+            jenkins_job = input(f"Please enter Jenkins Job/Project name [{JENKINS_JOB}]: ").strip()
+            if not jenkins_job:
+                jenkins_job = JENKINS_JOB
+                
+            print("\nScan Target Options:")
+            print(" [1] Scan entire repository (default)")
+            print(" [2] Scan specific file or directory")
+            target_opt = input("Enter choice [1]: ").strip()
+            
+            scan_path = ""
+            if target_opt == "2":
+                scan_path = input("Enter specific path (relative to repo root, e.g. src/app.js): ").strip()
+                
+            ai_choice = input("Enable AI Deep Analysis Layer? (Requires admin approval) [y/N]: ").strip().lower()
+            request_ai = "true" if ai_choice == "y" or ai_choice == "yes" else "false"
+            
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            sys.exit(0)
+            
+        print(f"\n{CYAN}📡 Initializing remote scan request on Jenkins...{RESET}")
+        
+        cj = CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+        
+        auth_str = f"{JENKINS_USER}:{JENKINS_TOKEN}"
+        auth_b64 = base64.b64encode(auth_str.encode()).decode()
+        auth_header = f"Basic {auth_b64}"
+        
+        crumb_url = f"{JENKINS_URL}/crumbIssuer/api/json"
+        req = urllib.request.Request(crumb_url)
+        req.add_header("Authorization", auth_header)
+        
+        try:
+            with opener.open(req) as response:
+                crumb_data = json.loads(response.read().decode())
+                crumb = crumb_data["crumb"]
+                crumb_field = crumb_data["crumbRequestField"]
+        except Exception as e:
+            print(f"{RED}❌ Failed to retrieve Jenkins CSRF crumb: {e}{RESET}")
+            print("Please check your Jenkins connection or credentials.")
+            sys.exit(1)
+            
+        trigger_url = f"{JENKINS_URL}/job/{jenkins_job}/buildWithParameters"
+        params = {
+            "REPO_URL": repo_url,
+            "BRANCH_NAME": branch_name,
+            "SCAN_PATH": scan_path,
+            "REQUEST_AI_LAYER": request_ai
+        }
+        data = urllib.parse.urlencode(params).encode('utf-8')
+        req = urllib.request.Request(trigger_url, data=data)
+        req.add_header("Authorization", auth_header)
+        req.add_header(crumb_field, crumb)
+        
+        try:
+            with opener.open(req) as response:
+                if response.status not in (200, 201):
+                    print(f"{RED}❌ Failed to trigger build. Status: {response.status}{RESET}")
+                    sys.exit(1)
+                queue_url = response.headers.get("Location")
+        except Exception as e:
+            print(f"{RED}❌ Failed to trigger Jenkins build: {e}{RESET}")
+            sys.exit(1)
+            
+        if not queue_url:
+            print(f"{RED}❌ Jenkins did not return a queue URL location header.{RESET}")
+            sys.exit(1)
+            
+        queue_url = normalize_url(queue_url, JENKINS_URL)
+        
+        print(f"⏳ Build queued. Waiting for build to start...")
+        build_number = None
+        build_url = None
+        
+        while not build_number:
+            req = urllib.request.Request(queue_url + "api/json")
+            req.add_header("Authorization", auth_header)
+            try:
+                with opener.open(req) as response:
+                    q_data = json.loads(response.read().decode())
+                    if "executable" in q_data and q_data["executable"]:
+                        build_number = q_data["executable"]["number"]
+                        build_url = q_data["executable"]["url"]
+                        break
+                    elif "cancelled" in q_data and q_data["cancelled"]:
+                        print(f"{RED}❌ Build was cancelled in Jenkins queue.{RESET}")
+                        sys.exit(1)
+            except Exception as e:
+                pass
+            time.sleep(2)
+            
+        build_url = normalize_url(build_url, JENKINS_URL)
+        print(f"{GREEN}🚀 Build #{build_number} is running!{RESET}")
+        print(f"Follow logs in browser: {build_url}console")
+        print(f"{GRAY}══════════════════════════════════════════════════════{RESET}")
+        
+        last_num_lines = 0
+        building = True
+        overall_status = "IN_PROGRESS"
+        
+        while building:
+            req = urllib.request.Request(build_url + "api/json")
+            req.add_header("Authorization", auth_header)
+            try:
+                with opener.open(req) as response:
+                    b_data = json.loads(response.read().decode())
+                    building = b_data.get("building", False)
+                    result = b_data.get("result")
+                    if not building:
+                        overall_status = result if result else "UNKNOWN"
+            except Exception as e:
+                time.sleep(2)
+                continue
+                
+            req_stages = urllib.request.Request(build_url + "wfapi/describe")
+            req_stages.add_header("Authorization", auth_header)
+            stages = []
+            try:
+                with opener.open(req_stages) as response:
+                    s_data = json.loads(response.read().decode())
+                    stages = s_data.get("stages", [])
+            except Exception as e:
+                pass
+                
+            if last_num_lines > 0:
+                sys.stdout.write(f"\033[{last_num_lines}A")
+                sys.stdout.flush()
+                
+            lines = []
+            lines.append(f"{CYAN}{BOLD}🛡️  Christ DevSecOps Pipeline Live Stage View (Build #{build_number}){RESET}")
+            lines.append(f"Repository:  {repo_url}")
+            lines.append(f"Branch:      {branch_name}")
+            if scan_path:
+                lines.append(f"Target Path: {scan_path}")
+            lines.append(f"{GRAY}══════════════════════════════════════════════════════{RESET}")
+            
+            for s in stages:
+                name = s.get("name", "Unknown Stage")
+                status = s.get("status", "NOT_RUN")
+                
+                color = RESET
+                status_text = status
+                
+                if status == "SUCCESS":
+                    color = GREEN
+                    status_text = "PASSED"
+                elif status == "FAILED":
+                    color = RED
+                    status_text = "FAILED"
+                elif status == "IN_PROGRESS":
+                    color = BLUE
+                    status_text = "RUNNING"
+                elif status == "PAUSED_PENDING_INPUT":
+                    color = YELLOW
+                    status_text = "WAITING FOR ADMIN APPROVAL"
+                elif status == "SKIPPED":
+                    color = GRAY
+                    status_text = "SKIPPED"
+                else:
+                    color = RESET
+                    status_text = "PENDING"
+                    
+                dur = s.get("durationMillis", 0) / 1000.0
+                dur_str = f" ({dur:.1f}s)" if dur > 0 else ""
+                lines.append(f"{color}[{status_text:<12}]{RESET} {name}{dur_str}")
+                
+            lines.append(f"{GRAY}══════════════════════════════════════════════════════{RESET}")
+            
+            status_color = RESET
+            if overall_status == "SUCCESS":
+                status_color = GREEN
+            elif overall_status == "FAILURE":
+                status_color = RED
+            elif overall_status == "UNSTABLE":
+                status_color = YELLOW
+            elif overall_status == "IN_PROGRESS":
+                status_color = BLUE
+                
+            lines.append(f"Overall Status: {status_color}{BOLD}{overall_status}{RESET}")
+            
+            for line in lines:
+                sys.stdout.write(f"\r\033[K{line}\n")
+            sys.stdout.flush()
+            last_num_lines = len(lines)
+            
+            if building:
+                time.sleep(3)
+                
+        # Download report if requested
+        if request_ai == "true" and overall_status in ("SUCCESS", "UNSTABLE"):
+            print(f"\n📥 Downloading HTML security audit report...")
+            report_url = f"{build_url}artifact/ai_security_audit.html"
+            req_report = urllib.request.Request(report_url)
+            req_report.add_header("Authorization", auth_header)
+            
+            download_success = False
+            for attempt in range(5):
+                try:
+                    with opener.open(req_report) as response:
+                        html_content = response.read()
+                        with open("ai_security_audit.html", "wb") as f:
+                            f.write(html_content)
+                        print(f"{GREEN}✅ Security audit report downloaded successfully to: ./ai_security_audit.html{RESET}")
+                        download_success = True
+                        break
+                except Exception as e:
+                    time.sleep(3)
+            if not download_success:
+                print(f"{YELLOW}⚠️  Could not download AI security report. It may have been skipped or not generated.{RESET}")
+                print(f"   You can check the artifacts in Jenkins: {build_url}")
+                
+        print(f"\n🎉 Done. Pipeline scan complete.")
+
+if __name__ == "__main__":
+    main()
