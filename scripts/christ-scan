@@ -23,9 +23,42 @@ UNDERLINE = "\033[4m"
 
 # Jenkins Configuration defaults
 JENKINS_URL = os.environ.get("JENKINS_URL", "http://13.233.125.248:8080")
-JENKINS_USER = os.environ.get("JENKINS_USER", "admin")
-JENKINS_TOKEN = os.environ.get("JENKINS_TOKEN", "5cfb9dfa923a429dbebda332f02cf571")
 JENKINS_JOB = os.environ.get("JENKINS_JOB", "Christ-DevSecOps-Auditor")
+
+# Local credentials storage to prevent hardcoding sensitive tokens in public script
+CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".christ_scan_auth")
+
+def load_auth():
+    # 1. Check environment variables
+    usr = os.environ.get("JENKINS_USER")
+    tok = os.environ.get("JENKINS_TOKEN")
+    if usr and tok:
+        return usr, tok
+
+    # 2. Check local credentials file
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                data = json.load(f)
+                return data.get("user", ""), data.get("token", "")
+        except:
+            pass
+
+    # 3. Prompt user if credentials not found
+    print(f"\n{YELLOW}{BOLD}🔐 Jenkins Authentication Required{RESET}")
+    print("Please enter your Jenkins credentials (stored securely in your home directory).")
+    try:
+        usr = input("Username: ").strip()
+        tok = input("API Token / Password: ").strip()
+        if usr and tok:
+            with open(CONFIG_FILE, "w") as f:
+                json.dump({"user": usr, "token": tok}, f)
+            print(f"{GREEN}✅ Credentials saved locally to {CONFIG_FILE}{RESET}\n")
+            return usr, tok
+    except KeyboardInterrupt:
+        print("\nCancelled.")
+        sys.exit(0)
+    return "", ""
 
 def get_git_remote():
     try:
@@ -209,12 +242,17 @@ def main():
             print("\nCancelled.")
             sys.exit(0)
             
+        jenkins_user, jenkins_token = load_auth()
+        if not jenkins_user or not jenkins_token:
+            print(f"{RED}Error: Jenkins credentials are required for remote scans.{RESET}")
+            sys.exit(1)
+
         print(f"\n{CYAN}📡 Initializing remote scan request on Jenkins...{RESET}")
         
         cj = CookieJar()
         opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
         
-        auth_str = f"{JENKINS_USER}:{JENKINS_TOKEN}"
+        auth_str = f"{jenkins_user}:{jenkins_token}"
         auth_b64 = base64.b64encode(auth_str.encode()).decode()
         auth_header = f"Basic {auth_b64}"
         
