@@ -21,6 +21,7 @@ RESET = "\033[0m"
 BOLD = "\033[1m"
 UNDERLINE = "\033[4m"
 
+# Jenkins Configuration defaults
 JENKINS_URL = os.environ.get("JENKINS_URL", "http://13.233.125.248:8080")
 JENKINS_USER = os.environ.get("JENKINS_USER", "admin")
 JENKINS_TOKEN = os.environ.get("JENKINS_TOKEN", "5cfb9dfa923a429dbebda332f02cf571")
@@ -39,6 +40,13 @@ def get_git_branch():
         return branch.decode().strip()
     except:
         return "main"
+
+def get_git_email():
+    try:
+        email = subprocess.check_output(["git", "config", "--get", "user.email"], stderr=subprocess.DEVNULL)
+        return email.decode().strip()
+    except:
+        return ""
 
 def normalize_url(url, base_url):
     if not url:
@@ -161,6 +169,7 @@ def main():
     elif mode == "1":
         detected_repo = get_git_remote()
         detected_branch = get_git_branch()
+        detected_email = get_git_email()
         
         try:
             repo_url = input(f"Please enter the Repository URL to scan [{detected_repo}]: ").strip()
@@ -190,6 +199,12 @@ def main():
             ai_choice = input("Enable AI Deep Analysis Layer? (Requires admin approval) [y/N]: ").strip().lower()
             request_ai = "true" if ai_choice == "y" or ai_choice == "yes" else "false"
             
+            developer_email = ""
+            if request_ai == "true":
+                developer_email = input(f"Please enter your email to receive notifications [{detected_email}]: ").strip()
+                if not developer_email:
+                    developer_email = detected_email
+                
         except KeyboardInterrupt:
             print("\nCancelled.")
             sys.exit(0)
@@ -222,6 +237,7 @@ def main():
             "REPO_URL": repo_url,
             "BRANCH_NAME": branch_name,
             "SCAN_PATH": scan_path,
+            "DEVELOPER_EMAIL": developer_email,
             "REQUEST_AI_LAYER": request_ai
         }
         data = urllib.parse.urlencode(params).encode('utf-8')
@@ -274,97 +290,154 @@ def main():
         last_num_lines = 0
         building = True
         overall_status = "IN_PROGRESS"
+        downloaded_preliminary = None  # None, "success", or "failed"
         
-        while building:
-            req = urllib.request.Request(build_url + "api/json")
-            req.add_header("Authorization", auth_header)
-            try:
-                with opener.open(req) as response:
-                    b_data = json.loads(response.read().decode())
-                    building = b_data.get("building", False)
-                    result = b_data.get("result")
-                    if not building:
-                        overall_status = result if result else "UNKNOWN"
-            except Exception as e:
-                time.sleep(2)
-                continue
-                
-            req_stages = urllib.request.Request(build_url + "wfapi/describe")
-            req_stages.add_header("Authorization", auth_header)
-            stages = []
-            try:
-                with opener.open(req_stages) as response:
-                    s_data = json.loads(response.read().decode())
-                    stages = s_data.get("stages", [])
-            except Exception as e:
-                pass
-                
-            if last_num_lines > 0:
-                sys.stdout.write(f"\033[{last_num_lines}A")
-                sys.stdout.flush()
-                
-            lines = []
-            lines.append(f"{CYAN}{BOLD}🛡️  Christ DevSecOps Pipeline Live Stage View (Build #{build_number}){RESET}")
-            lines.append(f"Repository:  {repo_url}")
-            lines.append(f"Branch:      {branch_name}")
-            if scan_path:
-                lines.append(f"Target Path: {scan_path}")
-            lines.append(f"{GRAY}══════════════════════════════════════════════════════{RESET}")
-            
-            for s in stages:
-                name = s.get("name", "Unknown Stage")
-                status = s.get("status", "NOT_RUN")
-                
-                color = RESET
-                status_text = status
-                
-                if status == "SUCCESS":
-                    color = GREEN
-                    status_text = "PASSED"
-                elif status == "FAILED":
-                    color = RED
-                    status_text = "FAILED"
-                elif status == "IN_PROGRESS":
-                    color = BLUE
-                    status_text = "RUNNING"
-                elif status == "PAUSED_PENDING_INPUT":
-                    color = YELLOW
-                    status_text = "WAITING FOR ADMIN APPROVAL"
-                elif status == "SKIPPED":
-                    color = GRAY
-                    status_text = "SKIPPED"
-                else:
-                    color = RESET
-                    status_text = "PENDING"
+        try:
+            while building:
+                req = urllib.request.Request(build_url + "api/json")
+                req.add_header("Authorization", auth_header)
+                try:
+                    with opener.open(req) as response:
+                        b_data = json.loads(response.read().decode())
+                        building = b_data.get("building", False)
+                        result = b_data.get("result")
+                        if not building:
+                            overall_status = result if result else "UNKNOWN"
+                except Exception as e:
+                    time.sleep(2)
+                    continue
                     
-                dur = s.get("durationMillis", 0) / 1000.0
-                dur_str = f" ({dur:.1f}s)" if dur > 0 else ""
-                lines.append(f"{color}[{status_text:<12}]{RESET} {name}{dur_str}")
+                req_stages = urllib.request.Request(build_url + "wfapi/describe")
+                req_stages.add_header("Authorization", auth_header)
+                stages = []
+                try:
+                    with opener.open(req_stages) as response:
+                        s_data = json.loads(response.read().decode())
+                        stages = s_data.get("stages", [])
+                except Exception as e:
+                    pass
+                    
+                # Check if preliminary report is ready to download
+                prelim_ready = False
+                for s in stages:
+                    if s.get("name") == "Generate Preliminary Report" and s.get("status") == "SUCCESS":
+                        prelim_ready = True
                 
-            lines.append(f"{GRAY}══════════════════════════════════════════════════════{RESET}")
-            
-            status_color = RESET
-            if overall_status == "SUCCESS":
-                status_color = GREEN
-            elif overall_status == "FAILURE":
-                status_color = RED
-            elif overall_status == "UNSTABLE":
-                status_color = YELLOW
-            elif overall_status == "IN_PROGRESS":
-                status_color = BLUE
+                if prelim_ready and downloaded_preliminary is None:
+                    # Download preliminary report
+                    report_url = f"{build_url}artifact/ai_security_audit.html"
+                    req_report = urllib.request.Request(report_url)
+                    req_report.add_header("Authorization", auth_header)
+                    try:
+                        with opener.open(req_report) as response:
+                            html_content = response.read()
+                            with open("ai_security_audit.html", "wb") as f:
+                                f.write(html_content)
+                        downloaded_preliminary = "success"
+                    except Exception:
+                        downloaded_preliminary = "failed"
+
+                if last_num_lines > 0:
+                    sys.stdout.write(f"\033[{last_num_lines}A")
+                    sys.stdout.flush()
+                    
+                lines = []
+                lines.append(f"{CYAN}{BOLD}🛡️  Christ DevSecOps Pipeline Live Stage View (Build #{build_number}){RESET}")
+                lines.append(f"Repository:  {repo_url}")
+                lines.append(f"Branch:      {branch_name}")
+                if scan_path:
+                    lines.append(f"Target Path: {scan_path}")
+                lines.append(f"{GRAY}══════════════════════════════════════════════════════{RESET}")
                 
-            lines.append(f"Overall Status: {status_color}{BOLD}{overall_status}{RESET}")
-            
-            for line in lines:
-                sys.stdout.write(f"\r\033[K{line}\n")
-            sys.stdout.flush()
-            last_num_lines = len(lines)
-            
-            if building:
-                time.sleep(3)
+                # Check if scanners are complete
+                scanners_complete = True
+                scanner_stages = ["Secrets (Trufflehog)", "SAST (SonarQube)", "SCA (Snyk)", "IaC (Checkov)", "SonarQube Quality Gate"]
                 
-        # Download report if requested
-        if request_ai == "true" and overall_status in ("SUCCESS", "UNSTABLE"):
+                for s in stages:
+                    name = s.get("name", "Unknown Stage")
+                    status = s.get("status", "NOT_RUN")
+                    
+                    color = RESET
+                    status_text = status
+                    
+                    if status == "SUCCESS":
+                        color = GREEN
+                        status_text = "PASSED"
+                    elif status == "FAILED":
+                        color = RED
+                        status_text = "FAILED"
+                    elif status == "IN_PROGRESS":
+                        color = BLUE
+                        status_text = "RUNNING"
+                    elif status == "PAUSED_PENDING_INPUT":
+                        color = YELLOW
+                        status_text = "WAITING FOR ADMIN APPROVAL"
+                    elif status == "SKIPPED":
+                        color = GRAY
+                        status_text = "SKIPPED"
+                    else:
+                        color = RESET
+                        status_text = "PENDING"
+                        
+                    dur = s.get("durationMillis", 0) / 1000.0
+                    dur_str = f" ({dur:.1f}s)" if dur > 0 else ""
+                    lines.append(f"{color}[{status_text:<12}]{RESET} {name}{dur_str}")
+                    
+                    # Track if any scanner stage is not finished
+                    if name in scanner_stages:
+                        if status in ("IN_PROGRESS", "PENDING", "NOT_RUN"):
+                            scanners_complete = False
+                            
+                lines.append(f"{GRAY}══════════════════════════════════════════════════════{RESET}")
+                
+                status_color = RESET
+                if overall_status == "SUCCESS":
+                    status_color = GREEN
+                elif overall_status == "FAILURE":
+                    status_color = RED
+                elif overall_status == "UNSTABLE":
+                    status_color = YELLOW
+                elif overall_status == "IN_PROGRESS":
+                    status_color = BLUE
+                    
+                lines.append(f"Overall Status: {status_color}{BOLD}{overall_status}{RESET}")
+                
+                if downloaded_preliminary == "success":
+                    lines.append(f"{GREEN}📥 Offline scanners report downloaded to ./ai_security_audit.html{RESET}")
+                elif downloaded_preliminary == "failed":
+                    lines.append(f"{YELLOW}⚠️  Could not download offline scanners report yet.{RESET}")
+
+                # Check if waiting for admin approval
+                is_awaiting_approval = False
+                for s in stages:
+                    if s.get("name") == "AI Layer: Request Admin Approval" and s.get("status") == "PAUSED_PENDING_INPUT":
+                        is_awaiting_approval = True
+                        
+                if scanners_complete and is_awaiting_approval:
+                    lines.append(f"\n{YELLOW}{BOLD}💡 Tip: All offline security scanners have completed!{RESET}")
+                    lines.append("   The AI Shield is currently awaiting admin approval to run deep logic analysis.")
+                    lines.append(f"   You can safely close this terminal ({BOLD}Ctrl+C{RESET}) now.")
+                    if developer_email:
+                        lines.append(f"   A notification email with the HTML report will be sent to: {BOLD}{developer_email}{RESET}")
+                    else:
+                        lines.append("   The final HTML report will be available in Jenkins once approved.")
+                
+                for line in lines:
+                    sys.stdout.write(f"\r\033[K{line}\n")
+                sys.stdout.flush()
+                last_num_lines = len(lines)
+                
+                if building:
+                    time.sleep(3)
+                    
+        except KeyboardInterrupt:
+            print(f"\n\n{YELLOW}👋 Exiting CLI. The pipeline will continue running on Jenkins.{RESET}")
+            if request_ai == "true" and developer_email:
+                print(f"   A notification email with the report will be sent to {BOLD}{developer_email}{RESET} when approved.")
+            sys.exit(0)
+            
+        # Download report at the end of build if the build completed
+        if overall_status in ("SUCCESS", "UNSTABLE"):
             print(f"\n📥 Downloading HTML security audit report...")
             report_url = f"{build_url}artifact/ai_security_audit.html"
             req_report = urllib.request.Request(report_url)
@@ -383,7 +456,7 @@ def main():
                 except Exception as e:
                     time.sleep(3)
             if not download_success:
-                print(f"{YELLOW}⚠️  Could not download AI security report. It may have been skipped or not generated.{RESET}")
+                print(f"{YELLOW}⚠️  Could not download final AI security report. It may have been skipped or not generated.{RESET}")
                 print(f"   You can check the artifacts in Jenkins: {build_url}")
                 
         print(f"\n🎉 Done. Pipeline scan complete.")

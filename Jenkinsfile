@@ -15,6 +15,7 @@ pipeline {
         string(name: 'REPO_URL', defaultValue: '', description: 'Repository URL to scan (e.g., https://gitlab.christuniversity.in/...)')
         string(name: 'BRANCH_NAME', defaultValue: 'main', description: 'Branch to scan (e.g., main, develop)')
         string(name: 'SCAN_PATH', defaultValue: '', description: 'Optional: specific file or folder path to scan (e.g., src/app.js or ZNF/). Leave empty to scan entire repo.')
+        string(name: 'DEVELOPER_EMAIL', defaultValue: '', description: 'Optional: developer email address to notify when the AI analysis completes.')
         booleanParam(name: 'REQUEST_AI_LAYER', defaultValue: false, description: 'Check to request AI-powered deep analysis — admin must approve in Jenkins before it runs')
     }
 
@@ -328,6 +329,47 @@ pipeline {
             }
         }
 
+        // ── Generate Preliminary Report ──────────────────────────────────
+        stage('Generate Preliminary Report') {
+            steps {
+                script {
+                    echo "📊 Generating preliminary offline scanners report..."
+                    def stageJson = _getStageStatusJson()
+                    def timestamp = new Date().format("yyyy-MM-dd HH:mm:ss")
+                    def scanErrors = fileExists(env.ERROR_FILE) ? readFile(env.ERROR_FILE).trim() : ''
+                    
+                    def scanTargetName = params.SCAN_PATH ? "path: ${params.SCAN_PATH}" : "Entire Repository"
+                    
+                    def prelimContent = """\\
+# 🛡️ Offline Security Scanners Complete
+
+The automated security scanners have finished scanning your target: **${scanTargetName}** (branch: **${params.BRANCH_NAME}**).
+Deep AI Security Analysis layer is **Awaiting Admin Approval**. Once the admin approves, the deep logic analysis and code-level remediations will be performed, and the final report will be sent to you.
+
+---
+
+### 📊 Offline Tool Run Summary
+- **Secrets (TruffleHog)**: ${env.STAGE_TRUFFLEHOG} (${env.DETAIL_TRUFFLEHOG ?: 'No verified secrets found'})
+- **SAST (SonarQube)**: ${env.STAGE_SONARQUBE} (${env.DETAIL_SONARQUBE ?: 'Quality Gate passed'})
+- **SCA (Snyk)**: ${env.STAGE_SNYK} (${env.DETAIL_SNYK ?: 'No dependency vulnerabilities found'})
+- **IaC (Checkov)**: ${env.STAGE_CHECKOV} (${env.DETAIL_CHECKOV ?: 'No IaC misconfigurations found'})
+
+---
+
+### 🛠️ Scanner Diagnostic Logs & Warnings
+${scanErrors ?: 'No issues or error logs generated.'}
+"""
+                    _buildHtmlReport(prelimContent, stageJson, timestamp)
+                    
+                    try {
+                        archiveArtifacts artifacts: 'ai_security_audit.html', allowEmptyArchive: true
+                    } catch (e) {
+                        echo "Preliminary report archiving failed: ${e.message}"
+                    }
+                }
+            }
+        }
+
         // ── AI Layer: Admin Approval Gate ────────────────────────────────
         stage('AI Layer: Request Admin Approval') {
             when {
@@ -432,6 +474,30 @@ This request will expire in 24 hours if not actioned.
 
                     // ── 7. Archive the report ────────────────────────
                     archiveArtifacts artifacts: 'ai_security_audit.html', allowEmptyArchive: true
+
+                    // ── 8. Email the report to the developer ────────
+                    if (params.DEVELOPER_EMAIL) {
+                        try {
+                            echo "📧 Sending AI Security Audit Report to ${params.DEVELOPER_EMAIL}..."
+                            emailext (
+                                to: params.DEVELOPER_EMAIL,
+                                subject: "🛡️ AI DevSecOps Security Audit Report — Build #${BUILD_NUMBER}",
+                                mimeType: 'text/html',
+                                attachmentsPattern: 'ai_security_audit.html',
+                                body: """\
+<h3>🛡️ AI DevSecOps Security Audit Complete</h3>
+<p>The AI Cybersecurity Shield has completed its deep analysis for repository: <b>${params.REPO_URL}</b> (branch: <b>${params.BRANCH_NAME}</b>).</p>
+<p>The build finished with status: <b>${currentBuild.currentResult}</b>.</p>
+<p>Please find the premium HTML report attached to this email. You can also view the build details here: <a href="${BUILD_URL}">${BUILD_URL}</a></p>
+<br>
+<p><i>This is an automated notification from Christ University DevSecOps Audit Pipeline.</i></p>
+"""
+                            )
+                            echo "✅ Email sent successfully."
+                        } catch (mailErr) {
+                            echo "⚠️ Failed to send email (check Jenkins SMTP configuration): ${mailErr.message}"
+                        }
+                    }
                 }
             }
         }
