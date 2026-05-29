@@ -16,6 +16,7 @@ pipeline {
         string(name: 'BRANCH_NAME', defaultValue: 'main', description: 'Branch to scan (e.g., main, develop)')
         string(name: 'SCAN_PATH', defaultValue: '', description: 'Optional: specific file or folder path to scan (e.g., src/app.js or ZNF/). Leave empty to scan entire repo.')
         string(name: 'DEVELOPER_EMAIL', defaultValue: '', description: 'Optional: developer email address to notify when the AI analysis completes.')
+        string(name: 'TARGET_URL', defaultValue: '', description: 'Optional: target URL for dynamic application security testing (DAST) with OWASP ZAP.')
         booleanParam(name: 'REQUEST_AI_LAYER', defaultValue: false, description: 'Check to request AI-powered deep analysis — admin must approve in Jenkins before it runs')
     }
 
@@ -42,7 +43,7 @@ pipeline {
         stage('Init') {
             steps {
                 script {
-                    sh "rm -rf target_repo scan_errors.txt ai_security_audit.html trufflehog_report.json sonar_output.txt snyk_report.txt snyk_report.json checkov_report.json checkov_report.txt trivy_report.json"
+                    sh "rm -rf target_repo scan_errors.txt ai_security_audit.html trufflehog_report.json sonar_output.txt snyk_report.txt snyk_report.json checkov_report.json checkov_report.txt trivy_report.json sbom_cyclonedx.json sbom_spdx.json zap_report.json"
                     writeFile file: env.ERROR_FILE, text: ''
                     // Stage status tracking
                     env.STAGE_TRUFFLEHOG = 'NOT_RUN'
@@ -50,6 +51,8 @@ pipeline {
                     env.STAGE_SNYK       = 'NOT_RUN'
                     env.STAGE_CHECKOV    = 'NOT_RUN'
                     env.STAGE_TRIVY      = 'NOT_RUN'
+                    env.STAGE_SBOM       = 'NOT_RUN'
+                    env.STAGE_ZAP        = 'NOT_RUN'
                     env.AI_APPROVED      = 'false'
                     // Detail messages for each stage
                     env.DETAIL_TRUFFLEHOG = ''
@@ -57,6 +60,8 @@ pipeline {
                     env.DETAIL_SNYK       = ''
                     env.DETAIL_CHECKOV    = ''
                     env.DETAIL_TRIVY      = ''
+                    env.DETAIL_SBOM       = ''
+                    env.DETAIL_ZAP        = ''
                     // Derive dynamic SonarQube project key from repo URL
                     // e.g. https://github.com/user/repo.git → user_repo
                     if (params.REPO_URL) {
@@ -404,6 +409,123 @@ pipeline {
             }  // end parallel
         }  // end Phase 2-3: Parallel Tools Scan
 
+        // ── SBOM Generation (CycloneDX) ──────────────────────────────────
+        // Generates a Software Bill of Materials — required by US Executive
+        // Order 14028 and demanded by Google, Microsoft, and every Fortune 500.
+        stage('SBOM Generation (CycloneDX)') {
+            steps {
+                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                    script {
+                        def scanTarget = "${WORKSPACE}/target_repo"
+                        if (params.SCAN_PATH) {
+                            scanTarget = "${WORKSPACE}/target_repo/${params.SCAN_PATH}"
+                        }
+
+                        echo "📦 Generating Software Bill of Materials (SBOM) with Syft..."
+
+                        def syftTarget = "dir:${scanTarget}"
+
+                        def syftExit = sh(
+                            script: """
+                                set +e
+                                syft ${syftTarget} -o cyclonedx-json=sbom_cyclonedx.json -o spdx-json=sbom_spdx.json 2>&1
+                                exit \$?
+                            """,
+                            returnStatus: true
+                        )
+
+                        if (syftExit == 0 && fileExists('sbom_cyclonedx.json')) {
+                            // Count components in the SBOM
+                            def componentCount = sh(
+                                script: "grep -c '\"bom-ref\"' sbom_cyclonedx.json 2>/dev/null || echo '0'",
+                                returnStdout: true
+                            ).trim()
+                            env.STAGE_SBOM = 'PASSED'
+                            env.DETAIL_SBOM = "Generated SBOM with ${componentCount} components (CycloneDX + SPDX)"
+                            echo "✅ SBOM generated: ${componentCount} components catalogued."
+                        } else {
+                            env.STAGE_SBOM = 'FAILED'
+                            env.DETAIL_SBOM = 'Syft failed to generate SBOM'
+                            _logError('SBOM Generation', 'Syft exited with non-zero status or produced no output')
+                            error("SBOM generation failed")
+                        }
+
+                        // Archive SBOM files as downloadable Jenkins artifacts
+                        try {
+                            archiveArtifacts artifacts: 'sbom_cyclonedx.json,sbom_spdx.json', allowEmptyArchive: true
+                        } catch (e) {
+                            echo "SBOM archiving note: ${e.message}"
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── DAST Stage (OWASP ZAP) ───────────────────────────────────────
+        // Dynamic Application Security Testing (DAST) attacks a running app 
+        // to detect vulnerabilities like SQL Injection, XSS, and CSRF.
+        stage('DAST (OWASP ZAP)') {
+            steps {
+                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                    script {
+                        if (!params.TARGET_URL) {
+                            echo "⏭️ DAST (OWASP ZAP) stage skipped because TARGET_URL parameter is empty. Please provide TARGET_URL if you want to run dynamic application scanning."
+                            env.STAGE_ZAP = 'SKIPPED'
+                            env.DETAIL_ZAP = 'Skipped (no TARGET_URL provided)'
+                        } else {
+                            echo "🕷️ Running OWASP ZAP DAST scan against target URL: ${params.TARGET_URL}..."
+                            
+                            // Check if Docker is available
+                            def hasDocker = sh(script: "which docker || echo ''", returnStdout: true).trim()
+                            if (!hasDocker) {
+                                env.STAGE_ZAP = 'FAILED'
+                                env.DETAIL_ZAP = 'Docker not installed on Jenkins agent — cannot run ZAP container'
+                                _logError('DAST (OWASP ZAP)', 'Docker command not found on agent.')
+                                error("Docker not installed")
+                            }
+
+                            // Run ZAP baseline scan in Docker
+                            // Mounts the workspace to /zap/wrk so the report is written back to host workspace
+                            def zapExit = sh(
+                                script: """
+                                    set +e
+                                    docker run --user root --rm -v "${WORKSPACE}":/zap/wrk/:rw zaproxy/zap-stable zap-baseline.py -t "${params.TARGET_URL}" -J zap_report.json 2>&1
+                                    exit \$?
+                                """,
+                                returnStatus: true
+                            )
+
+                            if (zapExit == 0 || zapExit == 1) {
+                                if (fileExists('zap_report.json')) {
+                                    def alertCount = sh(script: "grep -c '\"alert\"' zap_report.json || echo '0'", returnStdout: true).trim()
+                                    env.STAGE_ZAP = 'PASSED'
+                                    env.DETAIL_ZAP = "DAST scan completed. Found ${alertCount} alerts/warnings."
+                                    echo "✅ OWASP ZAP scan complete: ${alertCount} alerts/warnings catalogued."
+                                } else {
+                                    env.STAGE_ZAP = 'FAILED'
+                                    env.DETAIL_ZAP = 'ZAP completed but did not write zap_report.json'
+                                    _logError('DAST (OWASP ZAP)', 'ZAP completed but zap_report.json is missing.')
+                                    error("ZAP report missing")
+                                }
+                            } else {
+                                env.STAGE_ZAP = 'FAILED'
+                                env.DETAIL_ZAP = "ZAP scan failed with exit code ${zapExit}"
+                                _logError('DAST (OWASP ZAP)', "ZAP scan exited with error status ${zapExit}")
+                                error("ZAP scan exited with status ${zapExit}")
+                            }
+
+                            // Archive ZAP report
+                            try {
+                                archiveArtifacts artifacts: 'zap_report.json', allowEmptyArchive: true
+                            } catch (e) {
+                                echo "ZAP archiving note: ${e.message}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // ── SonarQube Quality Gate (sequential — must NOT be in parallel) ──
         stage('SonarQube Quality Gate') {
             steps {
@@ -444,7 +566,7 @@ pipeline {
                     
                     def scanTargetName = params.SCAN_PATH ? "path: ${params.SCAN_PATH}" : "Entire Repository"
                     
-                    def prelimContent = """\\
+                    def prelimContent = """\
 # 🛡️ Offline Security Scanners Complete
 
 The automated security scanners have finished scanning your target: **${scanTargetName}** (branch: **${params.BRANCH_NAME}**).
@@ -458,6 +580,8 @@ Deep AI Security Analysis layer is **Awaiting Admin Approval**. Once the admin a
 - **SCA (Snyk)**: ${env.STAGE_SNYK} (${env.DETAIL_SNYK ?: 'No dependency vulnerabilities found'})
 - **IaC (Checkov)**: ${env.STAGE_CHECKOV} (${env.DETAIL_CHECKOV ?: 'No IaC misconfigurations found'})
 - **Container Security (Trivy)**: ${env.STAGE_TRIVY} (${env.DETAIL_TRIVY ?: 'No container vulnerabilities found'})
+- **SBOM (CycloneDX/SPDX)**: ${env.STAGE_SBOM} (${env.DETAIL_SBOM ?: 'SBOM not generated'})
+- **DAST (OWASP ZAP)**: ${env.STAGE_ZAP} (${env.DETAIL_ZAP ?: 'DAST scan not run'})
 
 ---
 
@@ -470,6 +594,36 @@ ${scanErrors ?: 'No issues or error logs generated.'}
                         archiveArtifacts artifacts: 'ai_security_audit.html', allowEmptyArchive: true
                     } catch (e) {
                         echo "Preliminary report archiving failed: ${e.message}"
+                    }
+                }
+            }
+        }
+
+        // ── Security Metrics Dashboard ───────────────────────────────────
+        // Collects scan findings from all tools, records historical trends,
+        // and updates the dynamic HTML executive dashboard in Jenkins userContent.
+        stage('Security Metrics Dashboard') {
+            steps {
+                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                    script {
+                        echo "📊 Updating executive security metrics dashboard..."
+                        
+                        // Execute dashboard update script
+                        // Pass environment variables to Python script
+                        withEnv([
+                            "REPO_URL=${params.REPO_URL}",
+                            "BRANCH_NAME=${params.BRANCH_NAME}",
+                            "STAGE_TRUFFLEHOG=${env.STAGE_TRUFFLEHOG}",
+                            "STAGE_SONARQUBE=${env.STAGE_SONARQUBE}",
+                            "STAGE_SNYK=${env.STAGE_SNYK}",
+                            "STAGE_CHECKOV=${env.STAGE_CHECKOV}",
+                            "STAGE_TRIVY=${env.STAGE_TRIVY}",
+                            "STAGE_SBOM=${env.STAGE_SBOM}",
+                            "STAGE_ZAP=${env.STAGE_ZAP}",
+                            "AI_APPROVED=${env.AI_APPROVED}"
+                        ]) {
+                            sh "python3 target_repo/scripts/update_dashboard.py"
+                        }
                     }
                 }
             }
@@ -615,7 +769,7 @@ This request will expire in 24 hours if not actioned.
                 echo "🧹 Cleaning up workspace..."
                 // Archive all debug reports and the final AI report before cleanup
                 try {
-                    archiveArtifacts artifacts: 'scan_errors.txt,ai_security_audit.html,trufflehog_report.json,trufflehog_stderr.txt,snyk_report.json,snyk_report.txt,checkov_report.json,checkov_report.txt,sonar_output.txt,trivy_report.json', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'scan_errors.txt,ai_security_audit.html,trufflehog_report.json,trufflehog_stderr.txt,snyk_report.json,snyk_report.txt,checkov_report.json,checkov_report.txt,sonar_output.txt,trivy_report.json,sbom_cyclonedx.json,sbom_spdx.json,zap_report.json', allowEmptyArchive: true
                 } catch (e) {
                     echo "Artifact archiving skipped: ${e.message}"
                 }
@@ -656,6 +810,8 @@ PIPELINE STAGE STATUS (from Jenkins):
 | SCA – Dependencies (Snyk)    | ${env.STAGE_SNYK.padRight(10)} | ${(env.DETAIL_SNYK ?: 'N/A').take(40).padRight(40)} |
 | IaC Scanning (Checkov)       | ${env.STAGE_CHECKOV.padRight(10)} | ${(env.DETAIL_CHECKOV ?: 'N/A').take(40).padRight(40)} |
 | Container Security (Trivy)   | ${env.STAGE_TRIVY.padRight(10)} | ${(env.DETAIL_TRIVY ?: 'N/A').take(40).padRight(40)} |
+| SBOM (CycloneDX)             | ${env.STAGE_SBOM.padRight(10)} | ${(env.DETAIL_SBOM ?: 'N/A').take(40).padRight(40)} |
+| DAST (OWASP ZAP)             | ${env.STAGE_ZAP.padRight(10)} | ${(env.DETAIL_ZAP ?: 'N/A').take(40).padRight(40)} |
 
 IMPORTANT: You MUST analyze and report on EVERY stage listed above, especially any with status FAILED.
 If a stage FAILED, you MUST include it in your report with a detailed explanation of what failed and why.
@@ -672,7 +828,9 @@ def _getStageStatusJson() {
     {"name": "SAST (SonarQube)", "status": "${env.STAGE_SONARQUBE}", "detail": "${(env.DETAIL_SONARQUBE ?: '').replaceAll('"', '\\\\"').replaceAll('\n', ' ').replaceAll('\r', '').replaceAll('\t', ' ')}"},
     {"name": "SCA – Snyk", "status": "${env.STAGE_SNYK}", "detail": "${(env.DETAIL_SNYK ?: '').replaceAll('"', '\\\\"').replaceAll('\n', ' ').replaceAll('\r', '').replaceAll('\t', ' ')}"},
     {"name": "IaC (Checkov)", "status": "${env.STAGE_CHECKOV}", "detail": "${(env.DETAIL_CHECKOV ?: '').replaceAll('"', '\\\\"').replaceAll('\n', ' ').replaceAll('\r', '').replaceAll('\t', ' ')}"},
-    {"name": "Container Security (Trivy)", "status": "${env.STAGE_TRIVY}", "detail": "${(env.DETAIL_TRIVY ?: '').replaceAll('"', '\\\\"').replaceAll('\n', ' ').replaceAll('\r', '').replaceAll('\t', ' ')}"}
+    {"name": "Container Security (Trivy)", "status": "${env.STAGE_TRIVY}", "detail": "${(env.DETAIL_TRIVY ?: '').replaceAll('"', '\\\\"').replaceAll('\n', ' ').replaceAll('\r', '').replaceAll('\t', ' ')}"},
+    {"name": "SBOM (CycloneDX)", "status": "${env.STAGE_SBOM}", "detail": "${(env.DETAIL_SBOM ?: '').replaceAll('"', '\\\\"').replaceAll('\n', ' ').replaceAll('\r', '').replaceAll('\t', ' ')}"},
+    {"name": "DAST (OWASP ZAP)", "status": "${env.STAGE_ZAP}", "detail": "${(env.DETAIL_ZAP ?: '').replaceAll('"', '\\\\"').replaceAll('\n', ' ').replaceAll('\r', '').replaceAll('\t', ' ')}"}
 ]"""
 }
 
@@ -725,6 +883,23 @@ def _collectToolReports() {
         reports.append(readFile('trivy_report.json').take(8000))
     } else {
         reports.append("No report generated (tool may not have run).")
+    }
+
+    // SBOM (Software Bill of Materials)
+    reports.append("\n\n=== SBOM (CycloneDX) — Stage: ${env.STAGE_SBOM} ===\n")
+    if (fileExists('sbom_cyclonedx.json')) {
+        reports.append("SBOM generated successfully. Component summary (truncated):\n")
+        reports.append(readFile('sbom_cyclonedx.json').take(4000))
+    } else {
+        reports.append("No SBOM generated.")
+    }
+
+    // DAST (OWASP ZAP)
+    reports.append("\n\n=== DAST (OWASP ZAP) — Stage: ${env.STAGE_ZAP} ===\n")
+    if (fileExists('zap_report.json')) {
+        reports.append(readFile('zap_report.json').take(8000))
+    } else {
+        reports.append("No ZAP DAST report generated.")
     }
 
     return reports.toString()
