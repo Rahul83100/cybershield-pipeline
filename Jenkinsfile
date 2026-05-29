@@ -473,7 +473,12 @@ pipeline {
                             env.STAGE_ZAP = 'SKIPPED'
                             env.DETAIL_ZAP = 'Skipped (no TARGET_URL provided)'
                         } else {
-                            echo "🕷️ Running OWASP ZAP DAST scan against target URL: ${params.TARGET_URL}..."
+                            def targetUrl = params.TARGET_URL.trim()
+                            if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+                                targetUrl = "http://" + targetUrl
+                                echo "⚠️ TARGET_URL did not start with http:// or https://. Automatically prepended http:// to make it: ${targetUrl}"
+                            }
+                            echo "🕷️ Running OWASP ZAP DAST scan against target URL: ${targetUrl}..."
                             
                             // Check if Docker is available
                             def hasDocker = sh(script: "which docker || echo ''", returnStdout: true).trim()
@@ -489,7 +494,7 @@ pipeline {
                             def zapExit = sh(
                                 script: """
                                     set +e
-                                    docker run --user root --rm -v "${WORKSPACE}":/zap/wrk/:rw zaproxy/zap-stable zap-baseline.py -t "${params.TARGET_URL}" -J /zap/wrk/zap_report.json 2>&1
+                                    docker run --user root --rm -v "${WORKSPACE}":/zap/wrk/:rw zaproxy/zap-stable zap-baseline.py -t "${targetUrl}" -J /zap/wrk/zap_report.json 2>&1
                                     exit \$?
                                 """,
                                 returnStatus: true
