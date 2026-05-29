@@ -779,6 +779,19 @@ def generate_dashboard_html(filepath):
         let severityChartObj = null;
         let toolShareChartObj = null;
 
+        function getPublicBuildUrl(url) {
+            if (!url) return '';
+            try {
+                const u = new URL(url);
+                // Replace internal IP (e.g. 172.31.x.x) or other host with the current browser's host (e.g. 13.233.125.248:8080)
+                u.host = window.location.host;
+                u.protocol = window.location.protocol;
+                return u.toString();
+            } catch(e) {
+                return url;
+            }
+        }
+
         function toggleTheme() {
             const body = document.body;
             body.classList.toggle('light-mode');
@@ -938,7 +951,7 @@ def generate_dashboard_html(filepath):
                     </td>
                     <td>
                         ${scan.build_url ? 
-                            `<a href="${scan.build_url}artifact/ai_security_audit.html" target="_blank" class="btn" style="padding: 0.3rem 0.6rem; font-size: 0.8rem; border-radius: 6px;"><i class="fa-solid fa-file-pdf"></i> Open Report</a>` : 
+                            `<a href="${getPublicBuildUrl(scan.build_url)}artifact/ai_security_audit.html" target="_blank" class="btn" style="padding: 0.3rem 0.6rem; font-size: 0.8rem; border-radius: 6px;"><i class="fa-solid fa-file-pdf"></i> Open Report</a>` : 
                             `<span style="color: var(--text-secondary); font-size: 0.8rem;">Offline</span>`
                         }
                     </td>
