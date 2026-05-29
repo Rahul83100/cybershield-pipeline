@@ -355,7 +355,7 @@ pipeline {
                                 if (trivyExit != 0 && fileExists('trivy_report.json')) {
                                     def reportContent = readFile('trivy_report.json').trim()
                                     // Count vulnerabilities from JSON
-                                    def vulnCount = sh(script: "grep -c '"VulnerabilityID"' trivy_report.json 2>/dev/null || echo '0'", returnStdout: true).trim()
+                                    def vulnCount = sh(script: "grep -c '\\\"VulnerabilityID\\\"' trivy_report.json 2>/dev/null || echo '0'", returnStdout: true).trim()
                                     env.STAGE_TRIVY = 'FAILED'
                                     env.DETAIL_TRIVY = "Found ${vulnCount} HIGH/CRITICAL CVEs in container image"
                                     _logError('Container Security (Trivy)', "Trivy found ${vulnCount} HIGH/CRITICAL vulnerabilities in the Docker image built from ${hasDockerfile}")
@@ -372,7 +372,7 @@ pipeline {
                                     returnStatus: true
                                 )
                                 if (trivyExit != 0 && fileExists('trivy_report.json')) {
-                                    def vulnCount = sh(script: "grep -c '"VulnerabilityID"' trivy_report.json 2>/dev/null || echo '0'", returnStdout: true).trim()
+                                    def vulnCount = sh(script: "grep -c '\\\"VulnerabilityID\\\"' trivy_report.json 2>/dev/null || echo '0'", returnStdout: true).trim()
                                     env.STAGE_TRIVY = 'FAILED'
                                     env.DETAIL_TRIVY = "Found ${vulnCount} HIGH/CRITICAL vulnerabilities in filesystem scan (Docker build failed)"
                                     _logError('Container Security (Trivy)', "Trivy filesystem scan found ${vulnCount} vulnerabilities")
