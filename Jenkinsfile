@@ -42,19 +42,21 @@ pipeline {
         stage('Init') {
             steps {
                 script {
-                    sh "rm -rf target_repo scan_errors.txt ai_security_audit.html trufflehog_report.json sonar_output.txt snyk_report.txt snyk_report.json checkov_report.json checkov_report.txt"
+                    sh "rm -rf target_repo scan_errors.txt ai_security_audit.html trufflehog_report.json sonar_output.txt snyk_report.txt snyk_report.json checkov_report.json checkov_report.txt trivy_report.json"
                     writeFile file: env.ERROR_FILE, text: ''
                     // Stage status tracking
                     env.STAGE_TRUFFLEHOG = 'NOT_RUN'
                     env.STAGE_SONARQUBE  = 'NOT_RUN'
                     env.STAGE_SNYK       = 'NOT_RUN'
                     env.STAGE_CHECKOV    = 'NOT_RUN'
+                    env.STAGE_TRIVY      = 'NOT_RUN'
                     env.AI_APPROVED      = 'false'
                     // Detail messages for each stage
                     env.DETAIL_TRUFFLEHOG = ''
                     env.DETAIL_SONARQUBE  = ''
                     env.DETAIL_SNYK       = ''
                     env.DETAIL_CHECKOV    = ''
+                    env.DETAIL_TRIVY      = ''
                     // Derive dynamic SonarQube project key from repo URL
                     // e.g. https://github.com/user/repo.git → user_repo
                     if (params.REPO_URL) {
@@ -297,6 +299,108 @@ pipeline {
                 }
             }
         }
+
+        // ── Container Security (Trivy) ─────────────────────────────────────
+        stage('Container Security (Trivy)') {
+            steps {
+                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                    script {
+                        def scanTarget = "${WORKSPACE}/target_repo"
+                        if (params.SCAN_PATH) {
+                            scanTarget = "${WORKSPACE}/target_repo/${params.SCAN_PATH}"
+                        }
+
+                        // Check if target repo has a Dockerfile — if yes, build & scan the image
+                        // If no Dockerfile, fall back to filesystem vulnerability scan
+                        def hasDockerfile = sh(
+                            script: "find ${WORKSPACE}/target_repo -maxdepth 3 -name 'Dockerfile*' -type f | head -1",
+                            returnStdout: true
+                        ).trim()
+
+                        if (hasDockerfile) {
+                            echo "🐳 Dockerfile found: ${hasDockerfile} — building and scanning container image..."
+                            def dockerDir = sh(script: "dirname ${hasDockerfile}", returnStdout: true).trim()
+                            def imgTag = "trivy-scan-target:${BUILD_NUMBER}"
+
+                            // Build the Docker image from the detected Dockerfile
+                            def buildResult = sh(
+                                script: """
+                                    set +e
+                                    cd "${dockerDir}"
+                                    docker build -t ${imgTag} -f "${hasDockerfile}" . 2>&1 | tail -20
+                                    echo "EXIT_CODE=\$?"
+                                """,
+                                returnStdout: true
+                            ).trim()
+
+                            if (buildResult.contains('EXIT_CODE=0')) {
+                                // Scan the built image for CVEs
+                                def trivyExit = sh(
+                                    script: """
+                                        set +e
+                                        trivy image --severity HIGH,CRITICAL --format json --output trivy_report.json ${imgTag} 2>&1
+                                        exit \$?
+                                    """,
+                                    returnStatus: true
+                                )
+
+                                // Clean up the built image
+                                sh "docker rmi ${imgTag} 2>/dev/null || true"
+
+                                if (trivyExit != 0 && fileExists('trivy_report.json')) {
+                                    def reportContent = readFile('trivy_report.json').trim()
+                                    // Count vulnerabilities from JSON
+                                    def vulnCount = sh(script: "grep -c '"VulnerabilityID"' trivy_report.json 2>/dev/null || echo '0'", returnStdout: true).trim()
+                                    env.STAGE_TRIVY = 'FAILED'
+                                    env.DETAIL_TRIVY = "Found ${vulnCount} HIGH/CRITICAL CVEs in container image"
+                                    _logError('Container Security (Trivy)', "Trivy found ${vulnCount} HIGH/CRITICAL vulnerabilities in the Docker image built from ${hasDockerfile}")
+                                    error("Trivy found container vulnerabilities")
+                                } else {
+                                    env.STAGE_TRIVY = 'PASSED'
+                                    env.DETAIL_TRIVY = 'No HIGH/CRITICAL CVEs in container image'
+                                }
+                            } else {
+                                // Docker build failed — fall back to filesystem scan
+                                echo "⚠️ Docker build failed — falling back to filesystem vulnerability scan..."
+                                def trivyExit = sh(
+                                    script: "trivy fs --severity HIGH,CRITICAL --format json --output trivy_report.json ${scanTarget} 2>&1",
+                                    returnStatus: true
+                                )
+                                if (trivyExit != 0 && fileExists('trivy_report.json')) {
+                                    def vulnCount = sh(script: "grep -c '"VulnerabilityID"' trivy_report.json 2>/dev/null || echo '0'", returnStdout: true).trim()
+                                    env.STAGE_TRIVY = 'FAILED'
+                                    env.DETAIL_TRIVY = "Found ${vulnCount} HIGH/CRITICAL vulnerabilities in filesystem scan (Docker build failed)"
+                                    _logError('Container Security (Trivy)', "Trivy filesystem scan found ${vulnCount} vulnerabilities")
+                                    error("Trivy found vulnerabilities")
+                                } else {
+                                    env.STAGE_TRIVY = 'PASSED'
+                                    env.DETAIL_TRIVY = 'No HIGH/CRITICAL vulnerabilities found (filesystem scan — Docker build failed)'
+                                }
+                            }
+                        } else {
+                            // No Dockerfile — run filesystem vulnerability scan
+                            echo "📁 No Dockerfile found — running Trivy filesystem vulnerability scan..."
+                            def trivyExit = sh(
+                                script: "trivy fs --severity HIGH,CRITICAL --format json --output trivy_report.json ${scanTarget} 2>&1",
+                                returnStatus: true
+                            )
+                            if (trivyExit != 0 && fileExists('trivy_report.json')) {
+                                def vulnCount = sh(script: "grep -c '"VulnerabilityID"' trivy_report.json 2>/dev/null || echo '0'", returnStdout: true).trim()
+                                env.STAGE_TRIVY = 'FAILED'
+                                env.DETAIL_TRIVY = "Found ${vulnCount} HIGH/CRITICAL vulnerabilities in dependencies"
+                                _logError('Container Security (Trivy)', "Trivy filesystem scan found ${vulnCount} vulnerabilities")
+                                error("Trivy found vulnerabilities")
+                            } else {
+                                env.STAGE_TRIVY = 'PASSED'
+                                env.DETAIL_TRIVY = 'No HIGH/CRITICAL vulnerabilities found in dependencies'
+                            }
+                        }
+                        echo "✅ Trivy scan complete."
+                    }
+                }
+            }
+        }
+
             }  // end parallel
         }  // end Phase 2-3: Parallel Tools Scan
 
@@ -353,6 +457,7 @@ Deep AI Security Analysis layer is **Awaiting Admin Approval**. Once the admin a
 - **SAST (SonarQube)**: ${env.STAGE_SONARQUBE} (${env.DETAIL_SONARQUBE ?: 'Quality Gate passed'})
 - **SCA (Snyk)**: ${env.STAGE_SNYK} (${env.DETAIL_SNYK ?: 'No dependency vulnerabilities found'})
 - **IaC (Checkov)**: ${env.STAGE_CHECKOV} (${env.DETAIL_CHECKOV ?: 'No IaC misconfigurations found'})
+- **Container Security (Trivy)**: ${env.STAGE_TRIVY} (${env.DETAIL_TRIVY ?: 'No container vulnerabilities found'})
 
 ---
 
@@ -510,7 +615,7 @@ This request will expire in 24 hours if not actioned.
                 echo "🧹 Cleaning up workspace..."
                 // Archive all debug reports and the final AI report before cleanup
                 try {
-                    archiveArtifacts artifacts: 'scan_errors.txt,ai_security_audit.html,trufflehog_report.json,trufflehog_stderr.txt,snyk_report.json,snyk_report.txt,checkov_report.json,checkov_report.txt,sonar_output.txt', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'scan_errors.txt,ai_security_audit.html,trufflehog_report.json,trufflehog_stderr.txt,snyk_report.json,snyk_report.txt,checkov_report.json,checkov_report.txt,sonar_output.txt,trivy_report.json', allowEmptyArchive: true
                 } catch (e) {
                     echo "Artifact archiving skipped: ${e.message}"
                 }
@@ -550,6 +655,7 @@ PIPELINE STAGE STATUS (from Jenkins):
 | SAST (SonarQube)             | ${env.STAGE_SONARQUBE.padRight(10)} | ${(env.DETAIL_SONARQUBE ?: 'N/A').take(40).padRight(40)} |
 | SCA – Dependencies (Snyk)    | ${env.STAGE_SNYK.padRight(10)} | ${(env.DETAIL_SNYK ?: 'N/A').take(40).padRight(40)} |
 | IaC Scanning (Checkov)       | ${env.STAGE_CHECKOV.padRight(10)} | ${(env.DETAIL_CHECKOV ?: 'N/A').take(40).padRight(40)} |
+| Container Security (Trivy)   | ${env.STAGE_TRIVY.padRight(10)} | ${(env.DETAIL_TRIVY ?: 'N/A').take(40).padRight(40)} |
 
 IMPORTANT: You MUST analyze and report on EVERY stage listed above, especially any with status FAILED.
 If a stage FAILED, you MUST include it in your report with a detailed explanation of what failed and why.
@@ -565,7 +671,8 @@ def _getStageStatusJson() {
     {"name": "Secrets (TruffleHog)", "status": "${env.STAGE_TRUFFLEHOG}", "detail": "${(env.DETAIL_TRUFFLEHOG ?: '').replaceAll('"', '\\\\"').replaceAll('\n', ' ').replaceAll('\r', '').replaceAll('\t', ' ')}"},
     {"name": "SAST (SonarQube)", "status": "${env.STAGE_SONARQUBE}", "detail": "${(env.DETAIL_SONARQUBE ?: '').replaceAll('"', '\\\\"').replaceAll('\n', ' ').replaceAll('\r', '').replaceAll('\t', ' ')}"},
     {"name": "SCA – Snyk", "status": "${env.STAGE_SNYK}", "detail": "${(env.DETAIL_SNYK ?: '').replaceAll('"', '\\\\"').replaceAll('\n', ' ').replaceAll('\r', '').replaceAll('\t', ' ')}"},
-    {"name": "IaC (Checkov)", "status": "${env.STAGE_CHECKOV}", "detail": "${(env.DETAIL_CHECKOV ?: '').replaceAll('"', '\\\\"').replaceAll('\n', ' ').replaceAll('\r', '').replaceAll('\t', ' ')}"}
+    {"name": "IaC (Checkov)", "status": "${env.STAGE_CHECKOV}", "detail": "${(env.DETAIL_CHECKOV ?: '').replaceAll('"', '\\\\"').replaceAll('\n', ' ').replaceAll('\r', '').replaceAll('\t', ' ')}"},
+    {"name": "Container Security (Trivy)", "status": "${env.STAGE_TRIVY}", "detail": "${(env.DETAIL_TRIVY ?: '').replaceAll('"', '\\\\"').replaceAll('\n', ' ').replaceAll('\r', '').replaceAll('\t', ' ')}"}
 ]"""
 }
 
@@ -608,6 +715,14 @@ def _collectToolReports() {
         reports.append(readFile('checkov_report.json').take(8000))
     } else if (fileExists('checkov_report.txt')) {
         reports.append(readFile('checkov_report.txt').take(8000))
+    } else {
+        reports.append("No report generated (tool may not have run).")
+    }
+
+    // Trivy (Container / Filesystem vulnerability scanning)
+    reports.append("\n\n=== TRIVY (Container Security) — Stage: ${env.STAGE_TRIVY} ===\n")
+    if (fileExists('trivy_report.json')) {
+        reports.append(readFile('trivy_report.json').take(8000))
     } else {
         reports.append("No report generated (tool may not have run).")
     }
