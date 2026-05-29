@@ -489,7 +489,7 @@ pipeline {
                             def zapExit = sh(
                                 script: """
                                     set +e
-                                    docker run --user root --rm -v "${WORKSPACE}":/zap/wrk/:rw zaproxy/zap-stable zap-baseline.py -t "${params.TARGET_URL}" -J zap_report.json 2>&1
+                                    docker run --user root --rm -v "${WORKSPACE}":/zap/wrk/:rw zaproxy/zap-stable zap-baseline.py -t "${params.TARGET_URL}" -J /zap/wrk/zap_report.json 2>&1
                                     exit \$?
                                 """,
                                 returnStatus: true
