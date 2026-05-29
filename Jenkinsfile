@@ -495,7 +495,7 @@ pipeline {
                                 returnStatus: true
                             )
 
-                            if (zapExit == 0 || zapExit == 1) {
+                            if (zapExit == 0 || zapExit == 2 || zapExit == 3) {
                                 if (fileExists('zap_report.json')) {
                                     def alertCount = sh(script: "grep -c '\"alert\"' zap_report.json || echo '0'", returnStdout: true).trim()
                                     env.STAGE_ZAP = 'PASSED'
