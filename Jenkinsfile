@@ -480,6 +480,19 @@ pipeline {
                             }
                             echo "🕷️ Running OWASP ZAP DAST scan against target URL: ${targetUrl}..."
                             
+                            // Check network accessibility to targetUrl
+                            echo "🔍 Testing network connectivity to ${targetUrl} from EC2..."
+                            def connectionExit = sh(script: "curl -I -m 10 --connect-timeout 5 '${targetUrl}' > /dev/null 2>&1", returnStatus: true)
+                            if (connectionExit != 0) {
+                                echo "⚠️ WARNING: Target URL ${targetUrl} appears to be UNREACHABLE from this EC2 instance (curl exit code: ${connectionExit})."
+                                echo "Please verify that:"
+                                echo "1. The application is running at ${targetUrl}."
+                                echo "2. The Jenkins EC2 Security Group allows outbound traffic to this destination."
+                                echo "3. The target application's Security Group/firewall allows inbound traffic from this Jenkins EC2 public/private IP."
+                            } else {
+                                echo "✅ Network connectivity verified: EC2 can successfully reach ${targetUrl}."
+                            }
+                            
                             // Check if Docker is available
                             def hasDocker = sh(script: "which docker || echo ''", returnStdout: true).trim()
                             if (!hasDocker) {
@@ -494,7 +507,7 @@ pipeline {
                             def zapExit = sh(
                                 script: """
                                     set +e
-                                    docker run --user root --rm -v "${WORKSPACE}":/zap/wrk/:rw zaproxy/zap-stable zap-baseline.py -t "${targetUrl}" -J /zap/wrk/zap_report.json 2>&1
+                                    docker run --user root --rm -v "${WORKSPACE}":/zap/wrk/:rw zaproxy/zap-stable zap-baseline.py -t "${targetUrl}" -J zap_report.json 2>&1
                                     exit \$?
                                 """,
                                 returnStatus: true
@@ -629,16 +642,17 @@ ${scanErrors ?: 'No issues or error logs generated.'}
                         ]) {
                             sh "python3 target_repo/scripts/update_dashboard.py"
                             
-                            def host = "http://13.233.125.248:8080"
+                            def publicHost = "http://13.233.125.248:8080"
+                            def detectedHost = publicHost
                             try {
                                 def match = env.BUILD_URL =~ /(https?:\/\/[^\/]+)/
                                 if (match) {
-                                    host = match[0][1]
+                                    detectedHost = match[0][1]
                                 }
                             } catch (e) {
                                 // fallback
                             }
-                            echo "\n========================================================================\n📊 SECURITY DASHBOARD REFRESHED SUCCESSFULLY!\n👉 VIEW IT HERE: ${host}/userContent/security_dashboard.html\n========================================================================\n"
+                            echo "\n========================================================================\n📊 SECURITY DASHBOARD REFRESHED SUCCESSFULLY!\n👉 PUBLIC ACCESS LINK:  ${publicHost}/userContent/security_dashboard.html\n👉 DETECTED/VPC LINK:   ${detectedHost}/userContent/security_dashboard.html\n💡 Note: If the Detected link fails to open, it is because it uses a private IP (e.g. 172.x.x.x) only accessible inside AWS. Use the Public Access Link instead.\n========================================================================\n"
                         }
                     }
                 }
