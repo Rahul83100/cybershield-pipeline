@@ -390,7 +390,7 @@ pipeline {
                                 returnStatus: true
                             )
                             if (trivyExit != 0 && fileExists('trivy_report.json')) {
-                                def vulnCount = sh(script: "grep -c '"VulnerabilityID"' trivy_report.json 2>/dev/null || echo '0'", returnStdout: true).trim()
+                                def vulnCount = sh(script: "grep -c '\\\"VulnerabilityID\\\"' trivy_report.json 2>/dev/null || echo '0'", returnStdout: true).trim()
                                 env.STAGE_TRIVY = 'FAILED'
                                 env.DETAIL_TRIVY = "Found ${vulnCount} HIGH/CRITICAL vulnerabilities in dependencies"
                                 _logError('Container Security (Trivy)', "Trivy filesystem scan found ${vulnCount} vulnerabilities")
