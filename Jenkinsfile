@@ -628,6 +628,17 @@ ${scanErrors ?: 'No issues or error logs generated.'}
                             "AI_APPROVED=${env.AI_APPROVED}"
                         ]) {
                             sh "python3 target_repo/scripts/update_dashboard.py"
+                            
+                            def host = "http://13.233.125.248:8080"
+                            try {
+                                def match = env.BUILD_URL =~ /(https?:\/\/[^\/]+)/
+                                if (match) {
+                                    host = match[0][1]
+                                }
+                            } catch (e) {
+                                // fallback
+                            }
+                            echo "\n========================================================================\n📊 SECURITY DASHBOARD REFRESHED SUCCESSFULLY!\n👉 VIEW IT HERE: ${host}/userContent/security_dashboard.html\n========================================================================\n"
                         }
                     }
                 }
