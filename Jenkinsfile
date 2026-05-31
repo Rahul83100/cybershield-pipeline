@@ -666,18 +666,27 @@ ${scanErrors ?: 'No issues or error logs generated.'}
             }
             steps {
                 script {
-                    echo "🔐 AI Layer requested — sending approval request to admin..."
+                    // Validate that developer provided their email before requesting AI layer
+                    if (!params.DEVELOPER_EMAIL?.trim()) {
+                        echo "❌ DEVELOPER_EMAIL is required when requesting the AI Layer."
+                        echo "Please re-run the build and enter your email address in the DEVELOPER_EMAIL field."
+                        error("BUILD ABORTED: DEVELOPER_EMAIL is mandatory when REQUEST_AI_LAYER is checked. The admin needs to know who is requesting the AI scan.")
+                    }
+
+                    def devEmail = params.DEVELOPER_EMAIL.trim()
+                    echo "🔐 AI Layer requested by ${devEmail} — sending approval request to admin..."
 
                     try {
                         mail(
                             to: env.ADMIN_EMAIL,
-                            subject: "🔐 AI Scan Approval Request — ${params.REPO_URL}",
+                            subject: "🔐 AI Scan Approval Request from ${devEmail} — ${params.REPO_URL}",
                             body: """\
-A developer has requested the AI Cybersecurity Shield for:
+📧 Developer ${devEmail} has requested the AI Cybersecurity Shield for:
 
-  Repository : ${params.REPO_URL}
-  Branch     : ${params.BRANCH_NAME}
-  Build      : ${BUILD_URL}
+  Requested by : ${devEmail}
+  Repository   : ${params.REPO_URL}
+  Branch       : ${params.BRANCH_NAME}
+  Build        : ${BUILD_URL}
 
 To approve or deny, visit:
   ${BUILD_URL}input
