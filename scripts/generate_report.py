@@ -219,7 +219,7 @@ def main():
     if ai_content.strip():
         ai_html = md_to_html(ai_content)
     else:
-        ai_html = f'<p style="color:{C_ORANGE};font-size:1.1rem;padding:2rem;text-align:center;background:rgba(210,153,34,0.08);border:1px solid rgba(210,153,34,0.3);border-radius:12px;margin:2rem 0;">⚠️ AI analysis was not generated. Check Gemini API key and model configuration.</p>'
+        ai_html = f'<p style="color:{C_ORANGE};font-size:1.1rem;padding:2rem;text-align:center;background:rgba(210,153,34,0.08);border:1px solid rgba(210,153,34,0.3);border-radius:12px;margin:2rem 0;">⚠️ AI analysis was not generated. Check Claude API key and model configuration.</p>'
 
     passed = sum(1 for s in stages if s['status'] == 'PASSED')
     failed = sum(1 for s in stages if s['status'] == 'FAILED')
@@ -259,7 +259,7 @@ def main():
     <h1 style="font-size:2.2rem;font-weight:800;background:linear-gradient(90deg,{C_BLUE},{C_PURPLE},{C_CYAN});-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin:0 0 0.5rem 0;">🛡️ AI Cybersecurity Shield — Audit Report</h1>
     <div style="color:{C_TEXT2};font-size:0.9rem;display:flex;gap:2rem;justify-content:center;flex-wrap:wrap;">
         <span>📅 {html_module.escape(timestamp)}</span>
-        <span>🤖 Gemini 2.5 Flash</span>
+        <span>🤖 Claude Opus 4.8</span>
         <span>🔒 Advisory Only — No Code Modified</span>
     </div>
     <button onclick="window.print()" style="background:linear-gradient(90deg,{C_GREEN},#2ea043);border:none;border-radius:8px;padding:0.6rem 1.2rem;color:white;font-weight:600;font-family:inherit;cursor:pointer;margin-top:1rem;box-shadow:0 4px 15px rgba(63,185,80,0.2);font-size:0.9rem;">📄 Save as PDF</button>
@@ -297,7 +297,7 @@ def main():
 
 <!-- Footer -->
 <div style="text-align:center;padding:2rem;border-top:1px solid {C_BORDER};color:{C_MUTED};font-size:0.85rem;margin-top:3rem;">
-    <p>🛡️ AI Cybersecurity Shield — Powered by Gemini 2.5 Flash</p>
+    <p>🛡️ AI Cybersecurity Shield — Powered by Claude Opus 4.8</p>
     <div style="display:flex;gap:0.8rem;justify-content:center;margin-top:0.8rem;flex-wrap:wrap;">
         <span style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.3rem 0.8rem;border-radius:50px;background:{C_BG2};border:1px solid {C_BORDER};font-size:0.8rem;">🚫 Advisor Only</span>
         <span style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.3rem 0.8rem;border-radius:50px;background:{C_BG2};border:1px solid {C_BORDER};font-size:0.8rem;">📋 Developer Review Required</span>

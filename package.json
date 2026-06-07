@@ -1,6 +1,7 @@
 {
-  "name": "znfrepairandservices",
+  "name": "cybershield-pipeline",
   "version": "1.0.0",
+  "description": "AI-powered DevSecOps security auditing pipeline with 13 automated stages",
   "dependencies": {
     "express": "^4.21.2"
   },

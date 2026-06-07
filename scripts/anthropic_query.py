@@ -26,8 +26,10 @@ def query_anthropic(prompt_file):
         "Be concise, technical, and prioritize actionable remediation. Do not engage in conversational filler."
     )
 
+    model = os.environ.get("ANTHROPIC_MODEL", "claude-3-opus-20240229")
+
     payload = {
-        "model": "claude-sonnet-4-6",
+        "model": model,
         "max_tokens": 4096,
         "system": system_prompt,
         "messages": [

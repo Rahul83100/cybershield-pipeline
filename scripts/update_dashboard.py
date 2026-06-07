@@ -783,7 +783,7 @@ def generate_dashboard_html(filepath):
             if (!url) return '';
             try {
                 const u = new URL(url);
-                // Replace internal IP (e.g. 172.31.x.x) or other host with the current browser's host (e.g. 13.233.125.248:8080)
+                // Replace internal IP (e.g. 172.31.x.x) with the browser's current host for correct link resolution
                 u.host = window.location.host;
                 u.protocol = window.location.protocol;
                 return u.toString();

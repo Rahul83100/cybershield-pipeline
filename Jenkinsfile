@@ -1,7 +1,7 @@
 // ============================================================
 // AI-Enhanced DevSecOps Pipeline — AI Cybersecurity Shield
 // ============================================================
-// Claude Sonnet 4.6 performs DEEP vulnerability analysis beyond
+// Claude Opus 4.8 performs DEEP vulnerability analysis beyond
 // what tools detect. Generates a premium HTML audit report
 // with flowcharts, code snippets, and remediation roadmap.
 // AI is ADVISOR ONLY — never modifies code.
@@ -14,7 +14,7 @@ pipeline {
     parameters {
         string(name: 'REPO_URL', defaultValue: '', description: 'Repository URL to scan (e.g., https://gitlab.christuniversity.in/...)')
         string(name: 'BRANCH_NAME', defaultValue: 'main', description: 'Branch to scan (e.g., main, develop)')
-        string(name: 'SCAN_PATH', defaultValue: '', description: 'Optional: specific file or folder path to scan (e.g., src/app.js or ZNF/). Leave empty to scan entire repo.')
+        string(name: 'SCAN_PATH', defaultValue: '', description: 'Optional: specific file or folder path to scan (e.g., src/app.js or sample-app/). Leave empty to scan entire repo.')
         string(name: 'DEVELOPER_EMAIL', defaultValue: '', description: 'Optional: developer email address to notify when the AI analysis completes.')
         string(name: 'TARGET_URL', defaultValue: '', description: 'Optional: target URL for dynamic application security testing (DAST) with OWASP ZAP.')
         booleanParam(name: 'REQUEST_AI_LAYER', defaultValue: false, description: 'Check to request AI-powered deep analysis — admin must approve in Jenkins before it runs')
@@ -22,7 +22,8 @@ pipeline {
 
     environment {
         GIT_BRANCH      = 'secure-test'
-        ADMIN_EMAIL     = 'rahul636071@gmail.com'
+        // ⬇️ CONFIGURE: Replace with your admin email address
+        ADMIN_EMAIL     = 'your-admin@example.com'
 
         ERROR_FILE      = "${WORKSPACE}/scan_errors.txt"
         REPORT_FILE     = "${WORKSPACE}/ai_security_audit.html"
@@ -642,7 +643,8 @@ ${scanErrors ?: 'No issues or error logs generated.'}
                         ]) {
                             sh "python3 target_repo/scripts/update_dashboard.py"
                             
-                            def publicHost = "http://13.233.125.248:8080"
+                            // ⬇️ CONFIGURE: Replace with your Jenkins server's public URL
+                            def publicHost = "http://localhost:8080"
                             def detectedHost = publicHost
                             try {
                                 def match = env.BUILD_URL =~ /(https?:\/\/[^\/]+)/
@@ -720,7 +722,7 @@ This request will expire in 24 hours if not actioned.
         }
 
         // ══════════════════════════════════════════════════════════════════
-        // Phase 4: AI CYBERSECURITY SHIELD (Claude Sonnet 4.6 — Deep Analysis)
+        // Phase 4: AI CYBERSECURITY SHIELD (Claude Opus 4.8 — Deep Analysis)
         // ══════════════════════════════════════════════════════════════════
         stage('Phase 4: AI Cybersecurity Shield') {
             when {
@@ -734,7 +736,7 @@ This request will expire in 24 hours if not actioned.
 
                     echo "============================================"
                     echo "  🛡️  PHASE 4: AI CYBERSECURITY SHIELD"
-                    echo "  Engine: Claude Sonnet 4.6"
+                    echo "  Engine: Claude Opus 4.8"
                     echo "  Role: Deep Analysis + Advisory Only"
                     echo "============================================"
 
@@ -989,7 +991,7 @@ def _collectSourceCode() {
 }
 
 /**
- * Runs the AI Cybersecurity Shield analysis using Gemini 2.5 Flash.
+ * Runs the AI Cybersecurity Shield analysis using Claude Opus 4.8.
  * Generates a comprehensive vulnerability report in HTML format.
  */
 def _runSecurityAudit(String toolReports, String sourceCode, String scanErrors, String stageSummary, String stageJson) {
@@ -1145,7 +1147,7 @@ REMEMBER:
 - Be thorough, specific, and actionable
 """
 
-    echo "🧠 Calling Anthropic Claude Sonnet 4.6 for deep security analysis..."
+    echo "🧠 Calling Anthropic Claude Opus 4.8 for deep security analysis..."
     def aiOutput = _openAiCall(prompt)
 
     def timestamp = new Date().format("yyyy-MM-dd HH:mm:ss")

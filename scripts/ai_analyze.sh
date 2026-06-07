@@ -14,13 +14,13 @@
 
 set -euo pipefail
 
-API_KEY="${1:?'Missing GEMINI_API_KEY'}"
+API_KEY="${1:?'Missing CLAUDE_API_KEY'}"
 ERROR_FILE="${2:?'Missing ERROR_FILE path'}"
 REPORT_FILE="${3:?'Missing REPORT_FILE path'}"
 MODE="${4:-with_errors}"
 
 echo "⚠️  ai_analyze.sh is DEPRECATED. Delegating to ai_security_audit.sh..."
-echo "   AI role: Cybersecurity Shield (Gemini 2.5 Pro) – Advisor Only."
+echo "   AI role: Cybersecurity Shield (Claude Opus 4.8) – Advisor Only."
 echo "   Output: HTML report with flowcharts and code snippets."
 echo ""
 

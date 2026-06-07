@@ -1,6 +1,10 @@
+# Dependencies
 node_modules/
+package-lock.json
+
+# Build artifacts & scan outputs
+ai_security_audit*.html
 *.log
-.scannerwork/
 scan_errors.txt
 ai_report.txt
 fix_summary.txt
@@ -9,3 +13,33 @@ sonar_output.txt
 *_report.json
 *_report.txt
 .gemini_prompt.txt
+.claude_prompt.txt
+trufflehog_report.json
+snyk_report.*
+checkov_report.*
+trivy_report.json
+sbom_cyclonedx.json
+sbom_spdx.json
+zap_report.json
+
+# SonarQube
+.scannerwork/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Local CLI credentials (never commit)
+.christ_scan_auth
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

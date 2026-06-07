@@ -3,7 +3,7 @@
 # ai_security_audit.sh – AI Cybersecurity Shield (Standalone)
 # =============================================================
 # Standalone version of the AI Cybersecurity Shield.
-# Sends all tool scan results + source code to Gemini 2.5 Pro
+# Sends all tool scan results + source code to Claude Opus 4.8
 # for deep semantic vulnerability analysis.
 # Generates a premium HTML report. NEVER modifies code.
 #
@@ -20,7 +20,7 @@
 
 set -euo pipefail
 
-API_KEY="${1:?'Missing GEMINI_API_KEY'}"
+API_KEY="${1:?'Missing CLAUDE_API_KEY'}"
 WORKSPACE="${2:?'Missing WORKSPACE path'}"
 REPORT_FILE="${3:?'Missing REPORT_FILE path'}"
 
@@ -29,7 +29,6 @@ if [[ "${REPORT_FILE}" != *.html ]]; then
     REPORT_FILE="${REPORT_FILE%.txt}.html"
 fi
 
-GEMINI_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── Helper ────────────────────────────────────────────────────────────────────
@@ -158,7 +157,7 @@ IMPORTANT: You MUST analyze and report on EVERY stage listed above, especially a
 # ── 6. Build the AI prompt ────────────────────────────────────────────────────
 header "Building AI Cybersecurity Shield prompt..."
 
-PROMPT_FILE="${WORKSPACE}/.gemini_prompt.txt"
+PROMPT_FILE="${WORKSPACE}/.claude_prompt.txt"
 cat > "${PROMPT_FILE}" << PROMPTEOF
 You are an elite AI Cybersecurity Shield — the LAST LINE OF DEFENSE in a Jenkins DevSecOps pipeline for a project at Christ University.
 
@@ -236,80 +235,19 @@ graph TD
 REMEMBER: Report ALL failed stages. Include code snippets. Include Mermaid diagrams. Find what tools missed.
 PROMPTEOF
 
-# ── 7. Call Gemini 2.5 Pro API ────────────────────────────────────────────────
-header "Calling Gemini 2.5 Pro for deep security analysis..."
+# ── 7. Call Claude Opus 4.8 API ────────────────────────────────────────────────
+header "Calling Claude Opus 4.8 for deep security analysis..."
 
-# Build request JSON safely
-REQUEST=$(python3 -c "
-import sys, json
-prompt = open('${PROMPT_FILE}', 'r', encoding='utf-8', errors='replace').read()
-req = {
-    'contents': [{'parts': [{'text': prompt}]}],
-    'generationConfig': {
-        'temperature': 0.2,
-        'maxOutputTokens': 65536
-    }
+# Export API key for python script
+export ANTHROPIC_API_KEY="${API_KEY}"
+
+# Call python script to query Anthropic API
+AI_TEXT=$(python3 "${SCRIPT_DIR}/anthropic_query.py" "${PROMPT_FILE}" 2>&1) || {
+    echo "❌ Claude API failed"
+    AI_TEXT="⚠️ Claude API call failed. Manual security review recommended. Details: ${AI_TEXT}"
 }
-print(json.dumps(req))
-" 2>/dev/null)
-
-if [ -z "${REQUEST}" ]; then
-    echo "❌ Failed to build API request"
-    exit 1
-fi
-
-# Retry loop with backoff
-MAX_RETRIES=3
-DELAYS=(30 60 120)
-AI_TEXT=""
-
-for ATTEMPT in $(seq 0 ${MAX_RETRIES}); do
-    HTTP_RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
-        -X POST "${GEMINI_URL}" \
-        -H "Content-Type: application/json" \
-        -d "${REQUEST}")
-
-    HTTP_BODY=$(echo "${HTTP_RESPONSE}" | sed -e 's/HTTP_STATUS:.*//')
-    HTTP_STATUS=$(echo "${HTTP_RESPONSE}" | tr -d '\n' | sed -e 's/.*HTTP_STATUS://')
-
-    header "Gemini API response status: ${HTTP_STATUS}"
-
-    if [ "${HTTP_STATUS}" = "200" ]; then
-        # Parse response, filter out thinking tokens
-        AI_TEXT=$(echo "${HTTP_BODY}" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    parts = d['candidates'][0]['content']['parts']
-    text_parts = [p['text'] for p in parts if not p.get('thought', False)]
-    print('\n'.join(text_parts))
-except Exception as e:
-    print(f'Failed to parse Gemini response: {e}')
-" 2>/dev/null)
-        break
-    fi
-
-    if [ "${HTTP_STATUS}" = "429" ] || [ "${HTTP_STATUS}" = "503" ]; then
-        if [ "${ATTEMPT}" -lt "${MAX_RETRIES}" ]; then
-            DELAY=${DELAYS[$ATTEMPT]}
-            echo "⏳ Rate limited (${HTTP_STATUS}), waiting ${DELAY}s... (retry $((ATTEMPT+1))/${MAX_RETRIES})"
-            sleep "${DELAY}"
-        fi
-    else
-        echo "❌ Gemini API failed with status ${HTTP_STATUS}"
-        AI_TEXT="⚠️ Gemini API call failed (HTTP ${HTTP_STATUS}). Manual security review recommended.
-
-Raw API response:
-${HTTP_BODY}"
-        break
-    fi
-done
 
 rm -f "${PROMPT_FILE}"
-
-if [ -z "${AI_TEXT}" ]; then
-    AI_TEXT="⚠️ Gemini API returned no content after ${MAX_RETRIES} retries. Check API key and quota at https://aistudio.google.com/app/apikey"
-fi
 
 # ── 8. Generate HTML report ──────────────────────────────────────────────────
 header "Generating HTML report..."

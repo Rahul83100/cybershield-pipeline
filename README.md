@@ -1,176 +1,369 @@
-# 🛡️ AI-Enhanced DevSecOps Pipeline
+<div align="center">
 
-## Overview
-This repository contains a state-of-the-art DevSecOps pipeline orchestrated by Jenkins. It automatically scans code for secrets, vulnerabilities, open-source dependencies issues, and infrastructure misconfigurations.
-The defining feature is the **AI Cybersecurity Shield** powered by Gemini 2.5 Flash, which acts as a read-only advisor, analyzing the output of all tools along with the source code to find hidden vulnerabilities that traditional tools miss.
+# 🛡️ CyberShield Pipeline
 
-### 🌊 Pipeline Flowchart
+### AI-Powered DevSecOps Security Auditing Engine
 
-```mermaid
-graph TD
-    A[Code Push to GitHub] --> B[Jenkins Pipeline Trigger]
-    
-    subgraph "Phase 1: Code Acquisition"
-        B --> C[Checkout Source Code]
-    end
-    
-    subgraph "Phase 2: Security Scanners"
-        C --> D[TruffleHog: Secrets Scan]
-        D --> E[SonarQube: SAST Scan]
-        E --> F[Snyk: SCA Dependencies]
-        F --> G[Checkov: IaC Scan]
-    end
-    
-    subgraph "Phase 3: AI Cybersecurity Shield"
-        G --> H[Synthesize Scan Reports & Source Code]
-        H --> I[Gemini 2.5 Flash Deep Analysis]
-        I --> J[Generate HTML Audit Report]
-    end
-    
-    J --> K[Archive Artifacts]
-    J --> L[Report Available for Download]
-    
-    style A fill:#161b22,stroke:#30363d,color:#e6edf3
-    style B fill:#161b22,stroke:#30363d,color:#e6edf3
-    style C fill:#161b22,stroke:#3fb950,color:#e6edf3
-    style D fill:#161b22,stroke:#58a6ff,color:#e6edf3
-    style E fill:#161b22,stroke:#58a6ff,color:#e6edf3
-    style F fill:#161b22,stroke:#58a6ff,color:#e6edf3
-    style G fill:#161b22,stroke:#58a6ff,color:#e6edf3
-    style H fill:#161b22,stroke:#bc8cff,color:#e6edf3
-    style I fill:#21262d,stroke:#bc8cff,color:#e6edf3,stroke-width:2px
-    style J fill:#161b22,stroke:#3fb950,color:#e6edf3
-    style K fill:#161b22,stroke:#d29922,color:#e6edf3
-    style L fill:#161b22,stroke:#39d2c0,color:#e6edf3
-```
+A production-ready, cloud-native automated DevSecOps pipeline running **13 security stages** across **8 enterprise scanners**, backstopped by **Claude Opus 4.8** for deep semantic vulnerability detection.
 
-## 🛠️ The Technology Stack
+Automatically generates attack-flow diagrams, SBOM reports, and code remediation roadmaps — with zero manual steps.
 
-1.  **CI/CD Engine:** Jenkins
-2.  **Secrets Detection:** TruffleHog (`trufflehog`)
-3.  **Static Application Security Testing (SAST):** SonarQube
-4.  **Software Composition Analysis (SCA):** Snyk (`snyk`)
-5.  **Infrastructure as Code (IaC) Scanning:** Checkov (`checkov`)
-6.  **AI Audit Engine:** Google Gemini API (`gemini-2.5-flash`)
-7.  **Report Generation:** Pure Python (No JS/CDN to bypass Jenkins constraints)
-
-## ✨ The AI Security Report Fix Explained
-
-When initially building this pipeline, we faced two major hurdles with the AI reporting:
-1.  **Gemini API 404 Errors:** Google deprecated old experimental model names. The pipeline was fixed by migrating to the stable `gemini-2.5-flash` model endpoint on `v1beta`.
-2.  **Jenkins CSP (Content Security Policy) Stripping Styles:** Jenkins aggressively blocks `<script>` tags, `<link>` CSS tags to external CDNs (like Tailwind or marked.js), and even `<style>` code blocks. When viewing HTML in Jenkins, it turns into unstyled black-and-white text.
-    *   **The Solution:** The `generate_report.py` script was completely rewritten. It uses a custom Markdown-to-HTML parser in pure Python that manually attaches `style="..."` attributes to **every single HTML element** (100% Inline CSS).
-    *   This completely bypasses Jenkins CSP constraints, allowing the dark-themed, colorful security report to render gorgeously straight off a local download without needing internet connectivity or external assets.
+[![Jenkins](https://img.shields.io/badge/CI%2FCD-Jenkins-D24939?style=for-the-badge&logo=jenkins&logoColor=white)](https://www.jenkins.io/)
+[![Claude](https://img.shields.io/badge/AI-Claude%20Opus%204.8-cc785c?style=for-the-badge&logo=anthropic&logoColor=white)](https://www.anthropic.com/)
+[![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org/)
+[![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://docker.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
 
-## 🚀 Setting Up on a Fresh PC (Local Installation)
+[Features](#-features) · [Architecture](#-pipeline-architecture) · [Tech Stack](#-technology-stack) · [Installation](#-installation) · [CLI Tool](#-cli-scanner-cybershield-scan) · [Screenshots](#-screenshots) · [Security](#-security-architecture) · [Contributing](#contributing)
 
-If you need to replicate this entire DevSecOps environment on a fresh laptop, follow these exact steps.
+</div>
 
-### Step 1: System Prerequisites
-Ensure you have the following installed on your machine:
-*   [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine
-*   [Python 3.9+](https://www.python.org/downloads/)
-*   Git
+---
 
-### Step 2: Install Security Tools Locally Or on Jenkins Agent
-The Jenkins pipeline expects the following CLI tools to be available in the path:
+## 🎯 The Problem
+
+> **83% of codebases contain known vulnerabilities.** Manual security reviews take weeks. Traditional static scanners catch rule-based syntax bugs, but completely miss complex **business logic flaws**, **cascading attack vectors**, and **software supply chain vulnerabilities**. By the time you find the breach, the damage is already done.
+
+## 💡 The Solution
+
+CyberShield Pipeline automates the entire security auditing lifecycle in a single Jenkins pipeline trigger. It runs 8 enterprise-grade scanners in parallel, generates a full Software Bill of Materials for regulatory compliance, and then deploys an AI-powered semantic analysis layer (Claude Opus 4.8) that finds hidden vulnerabilities no traditional tool can detect — producing a premium HTML audit report with attack-flow diagrams and code-level remediation roadmaps.
+
+---
+
+## ✨ Features
+
+| Feature | Description |
+|---------|-------------|
+| 🔀 **Parallel Multi-Scanner Core** | 6 security scanners run simultaneously — secrets, SAST, SCA, IaC, container, and DAST |
+| 📋 **SBOM Generation** | Automated Software Bill of Materials in CycloneDX + SPDX formats (US EO 14028 compliant) |
+| 🧠 **AI Semantic Analysis** | Claude Opus 4.8 performs deep code analysis — finding business logic flaws, OWASP Top 10 patterns, and attack chains |
+| 📊 **Executive Dashboard** | Real-time HTML dashboard with vulnerability trends, severity charts, and historical posture tracking |
+| 📧 **Email Notifications** | Premium HTML audit report delivered directly to developer inboxes |
+| 🖥️ **Terminal CLI Scanner** | `cybershield-scan` — trigger scans from any terminal with live stage progress |
+| 🎯 **Targeted Path Scanning** | Audit specific files or directories without scanning the entire repository |
+| 🔐 **Admin Approval Gate** | AI execution requires explicit admin authorization — protecting API costs and enforcing oversight |
+| ✅ **Quality Gate** | SonarQube quality gate enforcement — fails builds that don't meet code quality thresholds |
+| 🤖 **Zero-Hallucination AI** | Strict sentinel logic ensures the AI never fabricates findings — advisor-only mode, never modifies code |
+
+---
+
+## 🏗️ Pipeline Architecture
+
+```mermaid
+graph TD
+    A["🔄 Code Push"] --> B["⚙️ Jenkins Trigger"]
+
+    subgraph "Phase 1 — Initialization"
+        B --> C["🧹 Init & Clean Workspace"]
+        C --> D["📥 Checkout Source Code"]
+    end
+
+    subgraph "Phase 2 — Parallel Security Scanning"
+        D --> E["🔑 TruffleHog\nSecrets Detection"]
+        D --> F["🔍 SonarQube\nSAST Analysis"]
+        D --> G["📦 Snyk\nDependency SCA"]
+        D --> H["☁️ Checkov\nIaC Audit"]
+        D --> I["🐳 Trivy\nContainer Security"]
+    end
+
+    subgraph "Phase 3 — Compliance & Quality"
+        E & F & G & H & I --> J["📋 Syft SBOM\nCycloneDX + SPDX"]
+        J --> K["⚡ OWASP ZAP\nDAST Scanning"]
+        K --> L["✅ SonarQube\nQuality Gate"]
+    end
+
+    subgraph "Phase 4 — Reporting"
+        L --> M["📄 Preliminary\nHTML Report"]
+        M --> N["📊 Metrics\nDashboard Update"]
+    end
+
+    subgraph "Phase 5 — AI Deep Analysis"
+        N --> O{"🔐 Admin\nApproval Gate"}
+        O -->|Approved| P["🧠 Claude Opus 4.8\nAI Security Shield"]
+        O -->|Denied/Timeout| R["📧 Send Preliminary\nReport Only"]
+        P --> Q["📧 Send Full AI\nAudit Report"]
+    end
+
+    style A fill:#161b22,stroke:#58a6ff,color:#e6edf3
+    style B fill:#161b22,stroke:#58a6ff,color:#e6edf3
+    style C fill:#161b22,stroke:#3fb950,color:#e6edf3
+    style D fill:#161b22,stroke:#3fb950,color:#e6edf3
+    style E fill:#161b22,stroke:#d29922,color:#e6edf3
+    style F fill:#161b22,stroke:#58a6ff,color:#e6edf3
+    style G fill:#161b22,stroke:#bc8cff,color:#e6edf3
+    style H fill:#161b22,stroke:#f0883e,color:#e6edf3
+    style I fill:#161b22,stroke:#39d2c0,color:#e6edf3
+    style J fill:#161b22,stroke:#8b949e,color:#e6edf3
+    style K fill:#161b22,stroke:#f85149,color:#e6edf3
+    style L fill:#161b22,stroke:#3fb950,color:#e6edf3
+    style M fill:#161b22,stroke:#58a6ff,color:#e6edf3
+    style N fill:#161b22,stroke:#bc8cff,color:#e6edf3
+    style O fill:#21262d,stroke:#d29922,color:#e6edf3,stroke-width:2px
+    style P fill:#21262d,stroke:#bc8cff,color:#e6edf3,stroke-width:3px
+    style Q fill:#161b22,stroke:#3fb950,color:#e6edf3
+    style R fill:#161b22,stroke:#8b949e,color:#e6edf3
+```
+
+---
+
+## 🛠️ Technology Stack
+
+| Category | Tool | Purpose |
+|----------|------|---------|
+| **CI/CD Engine** | Jenkins | Pipeline orchestration, build automation, approval gates |
+| **Secrets Detection** | TruffleHog | Filesystem entropy scanning for leaked API keys, passwords, and tokens |
+| **SAST** | SonarQube | Static Application Security Testing — XSS, SQL injection, code smells, OWASP Top 10 |
+| **SCA** | Snyk | Software Composition Analysis — scans npm/pip dependency trees for known CVEs |
+| **IaC Scanning** | Checkov | Infrastructure-as-Code audit — Terraform, Dockerfile, Kubernetes misconfigurations |
+| **Container Security** | Trivy | Docker image scanning for HIGH/CRITICAL CVEs in base images and layers |
+| **DAST** | OWASP ZAP | Dynamic Application Security Testing — runtime attack simulation (SQLi, XSS, CSRF) |
+| **SBOM Generation** | Syft | Software Bill of Materials in CycloneDX and SPDX formats (EO 14028 compliance) |
+| **AI Analysis** | Claude Opus 4.8 (Anthropic) | Deep semantic vulnerability analysis, attack-flow mapping, remediation roadmaps |
+| **Report Engine** | Python (Pure) | Custom Markdown-to-HTML renderer with 100% inline CSS (bypasses Jenkins CSP) |
+| **Cloud Infrastructure** | AWS EC2 | Production hosting for Jenkins, SonarQube (Docker), and all scanning tools |
+
+---
+
+## 📸 Screenshots
+
+> **Note:** Add your screenshots to `docs/screenshots/` and they will render here.
+
+### Pipeline Stage View
+![Pipeline running all 13 stages](docs/screenshots/pipeline-stages.png)
+
+### AI Security Audit Report  
+![Premium dark-themed HTML security report with severity badges and attack-flow diagrams](docs/screenshots/ai-audit-report.png)
+
+### Executive Metrics Dashboard
+![Real-time vulnerability trends and security posture dashboard](docs/screenshots/dashboard.png)
+
+### CLI Scanner in Action
+![Terminal showing cybershield-scan with live stage progress](docs/screenshots/cli-scanner.png)
+
+### Admin Approval Gate
+![Jenkins input step waiting for admin to approve AI analysis](docs/screenshots/admin-approval.png)
+
+### Email Notification
+![Email with HTML report attachment delivered to developer inbox](docs/screenshots/email-notification.png)
+
+---
+
+## 🚀 Installation
+
+### Prerequisites
+
+| Requirement | Version |
+|------------|---------|
+| Docker | 20.10+ |
+| Python | 3.9+ |
+| Git | 2.x+ |
+| Jenkins | 2.400+ LTS |
+
+### Step 1: Install Security Tools
+
 ```bash
-# macOS (using Homebrew)
-brew tap trufflesecurity/trufflehog
-brew install trufflehog
-brew tap snyk/tap
-brew install snyk
+# macOS (Homebrew)
+brew tap trufflesecurity/trufflehog && brew install trufflehog
+brew tap snyk/tap && brew install snyk
+pip3 install checkov
+
+# Linux (Debian/Ubuntu)
+curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin
+curl --compressed https://static.snyk.io/cli/latest/snyk-linux -o /usr/local/bin/snyk && chmod +x /usr/local/bin/snyk
 pip3 install checkov
 ```
-*(If you are running Jenkins inside a Docker container, these tools must be installed inside the Jenkins container, or the Jenkins server must be connecting to an agent machine/node that has these tools installed).*
 
-### Step 3: Run SonarQube Locally
-Start SonarQube using Docker.
+### Step 2: Start SonarQube
+
 ```bash
-docker run -d --name sonarqube -p 3000:9000 --restart unless-stopped sonarqube:lts-community
-```
-1. Wait a few minutes for the server to spin up.
-2. Visit `http://localhost:3000` in your browser.
-3. Login with default credentials: `admin` / `admin` (it will ask you to change the password).
-4. Go to **Administration -> Security -> Users -> Tokens**.
-5. Generate a new token. **Save this token**, you will need it for Jenkins!
-6. Create a new project manually inside SonarQube, name it `ZNf_Repair_and_Services` (note the exact project key, you may need to update the `sonar.projectKey` in the `Jenkinsfile` if you use a different one).
-
-### Step 4: Run Jenkins Locally
-Start Jenkins using Docker.
-```bash
-docker run -p 8080:8080 -p 50000:50000 -v jenkins_home:/var/jenkins_home jenkins/jenkins:lts
-```
-1. Look at the terminal output to copy the initial admin password.
-2. Visit `http://localhost:8080`, paste the password, and select "Install suggested plugins".
-3. Create your first admin user.
-4. **Important**: Go to **Manage Jenkins -> Plugins -> Available Plugins**. Search for and install the **"SonarQube Scanner"** plugin. Restart Jenkins if needed.
-
-### Step 5: Configure Jenkins Credentials & SonarQube Server
-The pipeline relies on several credentials and server configurations.
-
-1.  **Configure SonarQube Server in Jenkins:**
-    *   Go to **Manage Jenkins -> System**.
-    *   Scroll down to **SonarQube servers**. Click "Add SonarQube".
-    *   Name: `SonarQube`
-    *   Server URL: `http://host.docker.internal:3000` (Use this if Jenkins is in Docker and SonarQube is in another Docker container on Mac/Windows, otherwise use the actual IP).
-    *   Server authentication token: Add a new "Secret text" credential containing the SonarQube token you generated in Step 3. Select it from the dropdown. Save.
-
-2.  **Configure SonarQube Scanner Tool:**
-    *   Go to **Manage Jenkins -> Tools**.
-    *   Scroll down to **SonarQube Scanner**. Click "Add SonarQube Scanner".
-    *   Name: `SonarScanner` (Must perfectly match the name in your Jenkinsfile: `def scannerHome = tool 'SonarScanner'`).
-    *   Check "Install automatically". Save.
-
-3.  **Add Sensitive Credentials:**
-    Go to **Manage Jenkins -> Credentials -> System -> Global credentials -> Add Credentials**.
-    Create the following "Secret text" credentials. **The ID field must match these exactly:**
-    *   ID: `snyk-api-token` | Secret: *Your personal Snyk Token (from snyk.io)*
-    *   ID: `gemini-api-key` | Secret: *Your Google AI Studio API Key*
-
-### Step 6: Create the Pipeline Job
-1. In Jenkins dashboard, click **New Item**.
-2. Name it `znfrepair-secure-pipeline` and select **Pipeline**. Click OK.
-3. Scroll down to the **Pipeline** section.
-4. Definition: Select **Pipeline script from SCM**.
-5. SCM: **Git**.
-6. Repository URL: Enter your repo URL (e.g., `https://github.com/Rahul83100/znfrepairandservices.git`). Note: if it's a private repo, you must add and select Git credentials.
-7. Branch Specifier: `*/secure-test` (or whatever branch your `Jenkinsfile` resides on).
-8. Script Path: `Jenkinsfile` (Make sure this exactly matches where your file is in the repo).
-9. Click **Save**.
-
-### Step 7: Fix the Jenkins Container Missing Deps (If running Jenkins strictly in Docker)
-If you ran Jenkins via Docker default image, it does not have `snyk`, `checkov`, `trufflehog`, or `python3` installed.
-To fix this, log into the Jenkins container as root:
-```bash
-docker exec -u root -it <jenkins_container_id> bash
-```
-Then install the tools:
-```bash
-apt-get update
-# Install Python
-apt-get install -y python3 python3-pip
-# Install Snyk
-curl --compressed https://static.snyk.io/cli/latest/snyk-linux -o snyk
-chmod +x ./snyk
-mv ./snyk /usr/local/bin/
-# Install Checkov
-pip3 install checkov --break-system-packages
-# Trufflehog install via script
-curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin
+docker run -d --name sonarqube \
+  -p 9000:9000 \
+  --restart unless-stopped \
+  sonarqube:lts-community
 ```
 
-### Step 8: Trigger Build 🚀
-Click **Build Now** on your Jenkins pipeline.
-1. The pipeline will pull code.
-2. It will run Trufflehog (fast pass for secrets).
-3. It pushes data to your local SonarQube instance.
-4. Snyk checks `package.json` / Python dependencies.
-5. Checkov checks Terraforms/K8s/Dockerfiles.
-6. The AI collects all JSON/TXT outputs from these steps.
-7. Wait 1-2 minutes for Gemini to process the context.
-8. The build finishes! 
+1. Visit `http://localhost:9000` — default login: `admin` / `admin`
+2. Generate a user token: **Administration → Security → Users → Tokens**
+3. Save the token for Jenkins configuration
 
-Click on the **Build Number** (e.g., #1), look for **Build Artifacts** at the top, and click **`ai_security_audit.html`** to download your stunning AI Security Report!
+### Step 3: Start Jenkins
+
+```bash
+docker run -d --name jenkins \
+  -p 8080:8080 -p 50000:50000 \
+  -v jenkins_home:/var/jenkins_home \
+  jenkins/jenkins:lts
+```
+
+1. Get the initial admin password from container logs
+2. Install suggested plugins + **SonarQube Scanner** plugin
+
+### Step 4: Configure Jenkins Credentials
+
+Navigate to **Manage Jenkins → Credentials → System → Global** and add:
+
+| Credential ID | Type | Value |
+|--------------|------|-------|
+| `snyk-api-token` | Secret text | Your Snyk API token from [snyk.io](https://snyk.io) |
+| `anthropic_api_key` | Secret text | Your Anthropic API key from [console.anthropic.com](https://console.anthropic.com) |
+
+### Step 5: Configure SonarQube in Jenkins
+
+1. **Manage Jenkins → System → SonarQube servers** → Add:
+   - Name: `SonarQube`
+   - URL: `http://host.docker.internal:9000`
+   - Token: Add as Secret text credential
+2. **Manage Jenkins → Tools → SonarQube Scanner** → Add:
+   - Name: `SonarScanner`
+   - Install automatically: ✅
+
+### Step 6: Create Pipeline Job
+
+1. **New Item** → Name: `CyberShield-Pipeline` → Type: **Pipeline**
+2. **Pipeline** → Definition: `Pipeline script from SCM`
+3. **SCM:** Git → Repository URL: `https://github.com/YOUR_USERNAME/cybershield-pipeline.git`
+4. **Branch:** `*/main`
+5. **Script Path:** `Jenkinsfile`
+6. **Save** and click **Build Now** 🚀
+
+---
+
+## 🖥️ CLI Scanner (`cybershield-scan`)
+
+CyberShield includes a terminal-based scanner that developers can use to trigger scans without touching the Jenkins UI.
+
+### Setup
+
+```bash
+# Add to your PATH
+chmod +x scripts/christ-scan
+ln -s $(pwd)/scripts/christ-scan /usr/local/bin/cybershield-scan
+
+# Configure Jenkins connection
+export JENKINS_URL=http://your-jenkins-server:8080
+```
+
+### Usage
+
+```bash
+# Interactive mode — guided prompts
+cybershield-scan
+
+# Remote pipeline scan (full 8-tool + AI)
+cybershield-scan --remote
+
+# Local quick scan (TruffleHog + Checkov, offline)
+cybershield-scan --local
+```
+
+### Features
+
+- 🔐 **Secure Authentication** — Jenkins credentials stored locally in `~/.christ_scan_auth`
+- 📡 **Live Stage Progress** — Real-time terminal view of all pipeline stages
+- 📥 **Auto-Download** — Reports downloaded automatically on completion
+- 🎯 **Targeted Scanning** — Scan specific files or directories
+- 📧 **Email Integration** — Receive the AI audit report in your inbox
+
+---
+
+## 🔐 Security Architecture
+
+CyberShield implements a multi-layered security model:
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Layer 1: Jenkins Authentication                     │
+│  ├── Username + API Token (Basic Auth)               │
+│  └── CSRF Crumb Protection                           │
+├─────────────────────────────────────────────────────┤
+│  Layer 2: Credential Isolation                       │
+│  ├── API keys in Jenkins Credential Store            │
+│  ├── Never exposed in build logs                     │
+│  └── CLI uses local file (~/.christ_scan_auth)       │
+├─────────────────────────────────────────────────────┤
+│  Layer 3: Admin Approval Gate                        │
+│  ├── submitter: 'admin' — only admin can approve     │
+│  ├── 24-hour timeout auto-denial                     │
+│  └── Developer email validation required             │
+├─────────────────────────────────────────────────────┤
+│  Layer 4: Responsible AI                             │
+│  ├── Advisor-only mode — never modifies code         │
+│  ├── Zero-hallucination sentinel logic               │
+│  └── Structured prompt with strict output format     │
+└─────────────────────────────────────────────────────┘
+```
+
+For details, see [SECURITY.md](SECURITY.md).
+
+---
+
+## 📁 Project Structure
+
+```
+cybershield-pipeline/
+├── Jenkinsfile                  # Main pipeline — 13 stages, 1200+ lines
+├── scripts/
+│   ├── christ-scan              # CLI scanner tool (Python)
+│   ├── anthropic_query.py       # Claude Opus 4.8 API integration
+│   ├── generate_report.py       # Custom Markdown → HTML report engine
+│   ├── update_dashboard.py      # Executive metrics dashboard generator
+│   ├── ai_security_audit.sh     # AI analysis orchestration script
+│   └── ai_analyze.sh            # Analysis helper script
+├── sample-app/                  # Demo target application (intentionally vulnerable)
+│   ├── app.js                   # Express.js server
+│   ├── index.html               # Frontend
+│   ├── main.tf                  # Terraform config (for IaC scanning)
+│   └── README.md
+├── docs/
+│   └── screenshots/             # Pipeline screenshots for documentation
+├── .github/
+│   └── ISSUE_TEMPLATE/
+│       ├── bug_report.md
+│       └── feature_request.md
+├── .gitignore
+├── .trufflehog-ignore
+├── LICENSE
+├── SECURITY.md
+├── CONTRIBUTING.md
+└── README.md
+```
+
+---
+
+## 🧩 How the AI Report Engine Works
+
+One of the biggest technical challenges was rendering styled HTML reports inside Jenkins, which enforces a strict **Content Security Policy (CSP)** that strips all `<style>`, `<script>`, and `<link>` tags.
+
+**The Solution:** `generate_report.py` is a custom, pure-Python Markdown-to-HTML renderer that applies `style="..."` attributes to **every single HTML element** (100% inline CSS). This completely bypasses Jenkins CSP constraints, producing a dark-themed, fully-styled security report that renders beautifully both inside Jenkins and when downloaded locally — with zero external dependencies.
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] **RAG-Enhanced AI** — Index historical scan results for cross-reference analysis
+- [ ] **Compliance Mapping** — Map findings to OWASP Top 10, NIST 800-53, SOC 2
+- [ ] **GitOps Auto-Remediation** — Auto-create PRs with AI-suggested code fixes
+- [ ] **VS Code Extension** — Inline vulnerability diagnostics in the IDE
+- [ ] **Multi-Tenant Support** — Isolated scan namespaces with role-based access
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## 📄 License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+
+---
+
+<div align="center">
+
+**Built with 🛡️ by [Rahul R](https://github.com/Rahul83100)**
+
+*CyberShield Pipeline — Because security shouldn't be an afterthought.*
+
+</div>

@@ -22,7 +22,8 @@ BOLD = "\033[1m"
 UNDERLINE = "\033[4m"
 
 # Jenkins Configuration defaults
-JENKINS_URL = os.environ.get("JENKINS_URL", "http://13.233.125.248:8080")
+# Set your Jenkins server URL via environment variable: export JENKINS_URL=http://your-server:8080
+JENKINS_URL = os.environ.get("JENKINS_URL", "http://localhost:8080")
 JENKINS_JOB = os.environ.get("JENKINS_JOB", "Christ-DevSecOps-Auditor")
 
 # Local credentials storage to prevent hardcoding sensitive tokens in public script
