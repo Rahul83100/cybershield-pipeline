@@ -44,8 +44,8 @@ pipeline {
         stage('Init') {
             steps {
                 script {
-                    sh "rm -rf target_repo scan_errors.txt ai_security_audit.html trufflehog_report.json sonar_output.txt snyk_report.txt snyk_report.json checkov_report.json checkov_report.txt trivy_report.json sbom_cyclonedx.json sbom_spdx.json zap_report.json"
-                    writeFile file: env.ERROR_FILE, text: ''
+                    deleteDir() // Wipe the entire workspace to prevent hidden files like old .git logs from triggering scanners
+                    writeFile file: env.ERROR_FILE, text: '' // Recreate the error log file
                     // Stage status tracking
                     env.STAGE_TRUFFLEHOG = 'NOT_RUN'
                     env.STAGE_SONARQUBE  = 'NOT_RUN'
